@@ -4,7 +4,7 @@ image:
   repository: us-central1-docker.pkg.dev/cal-icor-hubs/core/node-placeholder-scaler
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "20240731-224556.git.292.hbc2de843"
+  tag: "20240731-224556.git.295.hf56190ba"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -93,9 +93,9 @@ grafana:
 #
 # FIXME: LET US MAKE THIS INTO A SCRIPT!
 nodePools:
-  jupyter:
+  base:
     nodeSelector:
-      hub.jupyter.org/pool-name: jupyter-pool
+      hub.jupyter.org/pool-name: base-pool
     resources:
       requests:
         # Some value slightly lower than allocatable RAM on the nodepool
