@@ -93,9 +93,9 @@ grafana:
 #
 # FIXME: LET US MAKE THIS INTO A SCRIPT!
 nodePools:
-  jupyter:
+  base:
     nodeSelector:
-      hub.jupyter.org/pool-name: jupyter-pool
+      hub.jupyter.org/pool-name: base-pool
     resources:
       requests:
         # Some value slightly lower than allocatable RAM on the nodepool
