@@ -1,10 +1,10 @@
 replicaCount: 1
 
 image:
-  repository: us-central1-docker.pkg.dev/cal-icor-hubs/test/
+  repository: us-central1-docker.pkg.dev/cal-icor-hubs/core/node-placeholder-scaler
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "20240731-224556.git.9078.h7f5894d8"
+  tag: "20240731-224556.git.288.h5ae00c2e"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -50,6 +50,7 @@ tolerations:
 
 # The URL of the public calendar to use for the node placeholder
 calendarUrl: 
+  https://calendar.google.com/calendar/ical/c_35d90f50598c1472a4154c538bb49a21eabd8be93831d7de345d53fea8e19390%40group.calendar.google.com/public/basic.ics
 
 grafana:
   tags:
