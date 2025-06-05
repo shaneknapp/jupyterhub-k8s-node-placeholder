@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: us-central1-docker.pkg.dev/ucb-datahub-2018/core/node-placeholder-scaler
+  repository: us-central1-docker.pkg.dev/cal-icor-hubs/test/
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: "20240731-224556.git.9078.h7f5894d8"
