@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 import argparse
 import logging
-import os
 import subprocess
 import tempfile
 import time
 from copy import deepcopy
 
-import niquests as requests
 from ruamel.yaml import YAML
 
 from .calendar import _event_repr, get_calendar, get_events
@@ -27,22 +25,6 @@ def make_deployment(pool_name, template, node_selector, resources, replicas):
 
 
 log = logging.getLogger(__name__)
-
-
-def post_grafana_annotation(grafana_url, grafana_api_key, tags, text):
-    """
-    Create annotation in a grafana instance.
-    """
-    return requests.post(
-        grafana_url + "/api/annotations",
-        json={
-            "tags": tags,
-            "text": text,
-            "time": int(time.time() * 1000),
-            "isRegion": False,
-        },
-        headers={"Authorization": f"Bearer {grafana_api_key}"},
-    ).text
 
 
 def get_replica_counts(events):
@@ -108,8 +90,6 @@ def main():
         replica_count_overrides = get_replica_counts(events)
         logging.info(f"Overrides: {replica_count_overrides}")
 
-        actions_taken = []
-
         # Generate deployment config based on our config
         for pool_name, pool_config in config["nodePools"].items():
             replica_count = replica_count_overrides.get(
@@ -134,31 +114,4 @@ def main():
                 )
 
                 logging.info(proc.stdout.strip())
-
-                # the prior logic here was looking for 'deployment.apps/data100-placeholder unchanged',
-                # but kubectl always returns 'deployment.apps/data100-placeholder configured'.
-                #
-                # since that logic always fails, the scaler would spam grafana
-                # with a notation for each hub, once a minute, for perpetuity.
-                #
-                # the 'Find out what happened her' is, i assume, a breadcrumb
-                # from yuvi, also leaving me to believe that this never really
-                # worked as intended. ;)
-                #
-                # 'actions_taken' could actually be useful in some way, so i
-                # plan on leaving that here (and commented out, most likely,
-                # for perpetuity).
-                #
-                # actions_taken.append(f"{pool_name} set to {replica_count}")
-                # Find out what happened her
-
-        if "grafana" in config and actions_taken:
-            # Post to grafana if we took any actions
-            grafana_url = config["grafana"]["url"]
-            grafana_tags = config["grafana"]["tags"]
-            grafana_api_key = os.environ["GRAFANA_API_KEY"]
-            text = "\n".join(actions_taken)
-            post_grafana_annotation(grafana_url, grafana_api_key, grafana_tags, text)
-            log.info("Posted annotation to Grafana")
-
         time.sleep(60)
