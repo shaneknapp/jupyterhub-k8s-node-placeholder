@@ -1,7 +1,7 @@
 charts:
   - name: node-placeholder
     chartPath: helm/node-placeholder
-    imagePrefix: us-central1-docker.pkg.dev/cal-icor-hubs/test/
+    imagePrefix: us-central1-docker.pkg.dev/cal-icor-hubs/core/
     repo:
       git: berkeley-dsep-infra/jupyterhub-k8s-node-placeholder
     images:
