@@ -10,9 +10,10 @@ RUN chmod +x /usr/local/bin/kubectl
 
 ENV PIP_NO_CACHE_DIR=1
 
-COPY node-placeholder-scaler/requirements.txt /tmp/requirements.txt
+COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install -r /tmp/requirements.txt
-COPY node-placeholder-scaler/scaler /srv/scaler
+RUN rm /tmp/requirements.txt
+COPY scaler /srv/scaler
 WORKDIR /srv
 ENTRYPOINT ["python3", "-m", "scaler"]
 USER nobody
