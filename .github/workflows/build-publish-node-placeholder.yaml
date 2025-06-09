@@ -1,0 +1,60 @@
+name: Build and Publish Docker Images and Helm Chart
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "**"
+
+permissions:
+  packages: write
+
+jobs:
+  publish-charts:
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
+    runs-on:  ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Google Cloud authentication
+        uses: 'google-github-actions/auth@v2'
+        with:
+          service_account: 'hubploy-922@cal-icor-hubs.iam.gserviceaccount.com'
+          workload_identity_provider: 'projects/1045396016572/locations/global/workloadIdentityPools/github-actions/providers/github-actions-publish'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install chartpress
+        run: pip install chartpress
+
+      - name: Configure Git
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Lint Helm Chart
+        run: |
+          helm lint --quiet helm/node-placeholder
+
+      - name: Run chartpress
+        run: |
+          chartpress --push
+
+      - name: Get the version
+        id: get_version
+        run: echo "version=$(cat helm/node-placeholder/Chart.yaml | grep "version:" | awk '{print $2}')" >> GITHUB_ENV
+
+      - name: Package Helm Chart
+        run: |
+          helm package helm/node-placeholder
+
+      - name: Push Helm Chart
+        run: |
+          helm push node-placeholder-${{ steps.get_version.outputs.VERSION }}.tgz oci://us-central1-docker.pkg.dev/cal-icor-hubs/core
