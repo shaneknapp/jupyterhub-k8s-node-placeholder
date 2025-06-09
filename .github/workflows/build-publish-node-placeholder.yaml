@@ -15,8 +15,6 @@ permissions:
 
 jobs:
   publish-charts:
-    outputs:
-      version: ${{ steps.get_version.outputs.VERSION }}
     runs-on:  ubuntu-latest
     steps:
       - name: Checkout repository
@@ -60,7 +58,7 @@ jobs:
 
       - name: Get the version
         id: get_version
-        run: echo "version=$(cat helm/node-placeholder/Chart.yaml | grep "version:" | awk '{print $2}')" >> GITHUB_ENV
+        run: echo "VERSION=$(cat helm/node-placeholder/Chart.yaml | grep "version:" | awk '{print $2}')" >> GITHUB_ENV
 
       - name: Package Helm Chart
         run: |
@@ -68,4 +66,4 @@ jobs:
 
       - name: Push Helm Chart
         run: |
-          helm push node-placeholder-${{ steps.get_version.outputs.VERSION }}.tgz oci://us-central1-docker.pkg.dev/cal-icor-hubs/core
+          helm push node-placeholder-${{ env.VERSION }}.tgz oci://us-central1-docker.pkg.dev/cal-icor-hubs/core
