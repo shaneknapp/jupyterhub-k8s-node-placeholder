@@ -9,7 +9,9 @@ on:
       - "**"
 
 permissions:
-  packages: write
+  contents: 'read'
+  id-token: 'write'
+  packages: 'write'
 
 jobs:
   publish-charts:
@@ -22,9 +24,18 @@ jobs:
 
       - name: Set up Google Cloud authentication
         uses: 'google-github-actions/auth@v2'
+        id: auth
         with:
+          token_format: 'access_token'
           service_account: 'hubploy-922@cal-icor-hubs.iam.gserviceaccount.com'
           workload_identity_provider: 'projects/1045396016572/locations/global/workloadIdentityPools/github-actions/providers/github-actions-publish'
+
+      - name: Login to GAR
+        uses: docker/login-action@v3
+        with:
+          registry: <location>-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
