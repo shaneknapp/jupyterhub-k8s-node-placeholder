@@ -59,8 +59,7 @@ jobs:
       - name: Get the version
         id: get_version
         run: |
-          v=$(cat helm/node-placeholder/Chart.yaml | grep "version:" | awk '{print $2}')
-          echo "VERSION=${v}" >> GITHUB_ENV
+          echo "VERSION=$(cat helm/node-placeholder/Chart.yaml | grep "version:" | awk '{print $2}')" >> $GITHUB_ENV
 
       - name: Package Helm Chart
         run: |
@@ -68,4 +67,4 @@ jobs:
 
       - name: Push Helm Chart
         run: |
-          helm push $(ls *.tgz) oci://us-central1-docker.pkg.dev/cal-icor-hubs/core
+          helm push node-placeholder-scaler-${{ env.VERSION }}.tgz oci://us-central1-docker.pkg.dev/cal-icor-hubs/core
