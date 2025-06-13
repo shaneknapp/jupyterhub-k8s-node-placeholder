@@ -59,7 +59,7 @@ jobs:
       - name: Get the version
         id: get_version
         run: |
-          echo "VERSION=$(cat helm/node-placeholder/Chart.yaml | grep "version:" | awk '{print $2}')" >> $GITHUB_ENV
+          echo "VERSION=$(grep "^version:" helm/node-placeholder/Chart.yaml | awk '{print $2}')" >> $GITHUB_ENV
 
       - name: Package Helm Chart
         run: |
