@@ -67,4 +67,4 @@ jobs:
 
       - name: Push Helm Chart
         run: |
-          helm push node-placeholder-scaler-${{ env.VERSION }}.tgz oci://us-central1-docker.pkg.dev/cal-icor-hubs/core
+          helm push node-placeholder-scaler-${{ env.VERSION }}.tgz oci://us-central1-docker.pkg.dev/cal-icor-hubs/helm-charts
