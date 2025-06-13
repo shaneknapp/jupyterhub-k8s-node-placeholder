@@ -1,0 +1,14 @@
+name: "Helm linter"
+on:
+- pull_request_target
+
+jobs:
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Lint Helm Chart
+      run: |
+        helm lint --quiet helm/node-placeholder
