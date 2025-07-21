@@ -57,7 +57,12 @@ def get_calendar(url: str):
             calendar = IcsCalendarStream.calendar_from_ics(f.read())
     else:
         r = requests.get(url)
-        r.raise_for_status()
+        if r.status_code == 500:
+            logging.info(f"Received intermittent 500 error from: {url}")
+            return None
+        else:
+            r.raise_for_status()
+
         calendar = IcsCalendarStream.calendar_from_ics(r.text)
 
     if calendar:
