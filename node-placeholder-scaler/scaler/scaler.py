@@ -15,13 +15,13 @@ yaml = YAML(typ="safe")
 
 
 def parse_quantity(q):
-    if q.endswith('m'):  # millicores
+    if q.endswith("m"):  # millicores
         return int(q[:-1])
-    elif q.endswith('Ki'):
+    elif q.endswith("Ki"):
         return int(int(q[:-2]) / 1024)
-    elif q.endswith('Mi'):
+    elif q.endswith("Mi"):
         return int(q[:-2])
-    elif q.endswith('Gi'):
+    elif q.endswith("Gi"):
         return int(q[:-2]) * 1024
     else:
         return int(q)
@@ -41,11 +41,7 @@ def get_node_allocatable():
         alloc_cpu = parse_quantity(alloc["cpu"])
         alloc_mem = parse_quantity(alloc["memory"])
         pool = labels.get("hub.jupyter.org/pool-name", "unknown")
-        alloc_data[name] = {
-            "cpu_m": alloc_cpu,
-            "mem_mi": alloc_mem,
-            "node_pool": pool
-        }
+        alloc_data[name] = {"cpu_m": alloc_cpu, "mem_mi": alloc_mem, "node_pool": pool}
     return alloc_data
 
 
@@ -76,18 +72,20 @@ def get_usable_resources(node_pool_name):
         used = usage.get(node, {"cpu_m": 0, "mem_mi": 0})
         free_cpu = info["cpu_m"] - used["cpu_m"]
         free_mem = info["mem_mi"] - used["mem_mi"]
-        result.append({
-            "node": node,
-            "cpu_alloc_m": info["cpu_m"],
-            "cpu_used_m": used["cpu_m"],
-            "cpu_free_m": free_cpu,
-            "cpu_free_ratio": float(free_cpu / info["cpu_m"]),
-            "mem_alloc_mi": info["mem_mi"],
-            "mem_used_mi": used["mem_mi"],
-            "mem_free_mi": free_mem,
-            "node_pool": info["node_pool"],
-            "mem_free_ratio": float(free_mem / info["mem_mi"]),
-        })
+        result.append(
+            {
+                "node": node,
+                "cpu_alloc_m": info["cpu_m"],
+                "cpu_used_m": used["cpu_m"],
+                "cpu_free_m": free_cpu,
+                "cpu_free_ratio": float(free_cpu / info["cpu_m"]),
+                "mem_alloc_mi": info["mem_mi"],
+                "mem_used_mi": used["mem_mi"],
+                "mem_free_mi": free_mem,
+                "node_pool": info["node_pool"],
+                "mem_free_ratio": float(free_mem / info["mem_mi"]),
+            }
+        )
     return result
 
 
@@ -169,19 +167,24 @@ def main():
         logging.info(f"Overrides: {replica_count_overrides}")
 
         # Generate deployment config based on our config
-        for pool_name, pool_config in config["nodePools"].items():            
+        for pool_name, pool_config in config["nodePools"].items():
             pool_usage_result = get_usable_resources(pool_name)
             node_placerholder_required = True
             for node_usage in pool_usage_result:
-                if node_usage['mem_free_ratio'] >= 0.2 and node_usage['cpu_free_ratio'] >= 0.2:
-                    logging.info(f"Node {node_usage['node']} has sufficient resources. Free CPU Ratio is {node_usage['cpu_free_ratio']:.2f}, Free Memory Ratio is {node_usage['mem_free_ratio']:.2f}.")
+                if (
+                    node_usage["mem_free_ratio"] >= 0.2
+                    and node_usage["cpu_free_ratio"] >= 0.2
+                ):
+                    logging.info(
+                        f"Node {node_usage['node']} has sufficient resources. Free CPU Ratio is {node_usage['cpu_free_ratio']:.2f}, Free Memory Ratio is {node_usage['mem_free_ratio']:.2f}."
+                    )
                     node_placerholder_required = False
                     break
             if not node_placerholder_required:
-                logging.info(f"Node placeholder is not required for pool {pool_name}, resources on other nodes are sufficient.")
-                replica_count = replica_count_overrides.get(
-                    pool_name, 0
+                logging.info(
+                    f"Node placeholder is not required for pool {pool_name}, resources on other nodes are sufficient."
                 )
+                replica_count = replica_count_overrides.get(pool_name, 0)
             else:
                 replica_count = replica_count_overrides.get(
                     pool_name, pool_config["replicas"]
