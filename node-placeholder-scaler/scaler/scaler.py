@@ -192,10 +192,10 @@ def placeholder_pod_running_on_node(node_name, namespace, label_selector):
         return False
 
     except subprocess.CalledProcessError as e:
-        print(f"Error running kubectl: {e.stderr}")
+        logging.error(f"Error running kubectl: {e.stderr}")
         return False
     except json.JSONDecodeError:
-        print("Failed to parse kubectl output as JSON.")
+        logging.error("Failed to parse kubectl output as JSON.")
         return False
 
 
@@ -308,10 +308,10 @@ def main():
                     mem_free_ratio = resources["mem_free_ratio"]
                     if cpu_free_ratio > 0.2 and mem_free_ratio > 0.2:
                         modify_node_placeholder_deployment = True
-                        print(f"Node {node} has sufficient resources (CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio}).")
+                        logging.info(f"Node {node} has sufficient resources (CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio}).")
                         break
                 else:
-                    print(f"Placeholder pod is running on node {node}. Skipping resource check for this node.")
+                    logging.info(f"Placeholder pod is running on node {node}. Skipping resource check for this node.")
    
             if modify_node_placeholder_deployment:
                 logging.info(
