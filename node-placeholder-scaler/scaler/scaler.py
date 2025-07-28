@@ -250,22 +250,6 @@ def get_replica_counts(events):
 
 
 def main():
-    """
-    We can use a variable 'modify_node_placeholder_deployment' to control whether we want to modify the node-placeholder deployment or not.
-    Calendar events alreays have the highest priority, so we should not modify the deployment if there are calendar events.
-
-    There are several cases to consider when there are no calendar events:
-
-    1. If there are no nodes running in the pool, we should respect the config setting, 
-    meaning if the config is set to 1, we should set the placeholder deployment replica to 1.
-
-    2. If there are no-placeholder nodes running in the pool, we should check the usable resources on each node.
-    If there is a non-placeholder node that has resources above a threshold (e.g., 20% free CPU and memory), we should set the placeholder deployment replica to 0.
-    If all the non-placeholder nodes have resources below the threshold, we should respect the config setting for the placeholder deployment replica.
-
-    3. If there are only placeholder nodes running in the pool, we should respect the config setting for the placeholder deployment replica.
-
-    """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
     argparser = argparse.ArgumentParser()
@@ -276,11 +260,12 @@ def main():
 
     args = argparser.parse_args()
 
-    usable_resources_result = get_usable_resources()
+    
     namespace = "node-placeholder"
     label_selector = "app=node-placeholder-scaler,component=placeholder"
 
     while True:
+        usable_resources_result = get_usable_resources()
         # Reload all config files on each iteration, so we can change config
         # without needing to bounce the pod
         with open(args.config_file) as f:
@@ -300,28 +285,34 @@ def main():
         for pool_name, pool_config in config["nodePools"].items():
             pool_usable_resources = usable_resources_result.get(pool_name + '-pool', {})
             logging.info(f"Processing the node pool: '{pool_name}' ... ")
-            modify_node_placeholder_deployment = False
+            node_placeholder_deployment_reduction = 0
             for node, resources in pool_usable_resources.items():
+                logging.info(f"Checking node {node} in pool {pool_name} ...")
+                logging.info(
+                    f"Node {node} has {resources['cpu_free_ratio']:.2f} CPU free ratio and {resources['mem_free_ratio']:.2f} Memory free ratio."
+                )
                 # Check if a placeholder pod is running on this node
                 if not placeholder_pod_running_on_node(node, namespace, label_selector):
                     cpu_free_ratio = resources["cpu_free_ratio"]
                     mem_free_ratio = resources["mem_free_ratio"]
                     if cpu_free_ratio > 0.2 and mem_free_ratio > 0.2:
-                        modify_node_placeholder_deployment = True
                         logging.info(f"Node {node} has sufficient resources (CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio}).")
-                        break
+                        node_placeholder_deployment_reduction += 1
                 else:
                     logging.info(f"Placeholder pod is running on node {node}. Skipping resource check for this node.")
    
-            if modify_node_placeholder_deployment:
-                logging.info(
-                    f"Node placeholder is not required for pool {pool_name}, resources on other nodes are sufficient. Setting replica count to 0."
-                )
-                replica_count = replica_count_overrides.get(pool_name, 0)
-            else:
-                replica_count = replica_count_overrides.get(
-                    pool_name, pool_config["replicas"]
-                )
+           
+            modified_config_replica = max(0, pool_config["replicas"] - node_placeholder_deployment_reduction)
+            modified_calender_replica = max(0, replica_count_overrides.get(pool_name, 0) - node_placeholder_deployment_reduction)
+            logging.info(
+                f"Reducing {pool_name} placeholder deployment replicas by {node_placeholder_deployment_reduction}."
+            )
+            logging.info(
+                f"Modified config replica count: {modified_config_replica}, Modified calendar replica count: {modified_calender_replica}"
+            )
+            replica_count = max(
+                modified_config_replica, modified_calender_replica
+            )
 
             deployment = make_deployment(
                 pool_name,
