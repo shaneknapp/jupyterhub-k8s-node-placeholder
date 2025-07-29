@@ -300,20 +300,16 @@ def main():
                         node_placeholder_deployment_reduction += 1
                 else:
                     logging.info(f"Placeholder pod is running on node {node}. Skipping resource check for this node.")
-   
-           
-            modified_config_replica = max(0, pool_config["replicas"] - node_placeholder_deployment_reduction)
-            modified_calender_replica = max(0, replica_count_overrides.get(pool_name, 0) - node_placeholder_deployment_reduction)
-            logging.info(
-                f"Reducing {pool_name} placeholder deployment replicas by {node_placeholder_deployment_reduction}."
-            )
-            logging.info(
-                f"Modified config replica count: {modified_config_replica}, Modified calendar replica count: {modified_calender_replica}"
-            )
-            replica_count = max(
-                modified_config_replica, modified_calender_replica
-            )
-
+            
+            calendar_replica_count = replica_count_overrides.get(pool_name, 0)
+            config_replica_count = pool_config["replicas"]
+            modified_replica = replica_count_overrides.get(pool_name,pool_config["replicas"]) - node_placeholder_deployment_reduction
+            logging.info(f"Calendar replica count for pool {pool_name}: {calendar_replica_count}")
+            logging.info(f"Config replica count for pool {pool_name}: {config_replica_count}")
+            logging.info(f"Reducing {pool_name} placeholder deployment replicas by {node_placeholder_deployment_reduction} based on node resources.")
+            replica_count = max(modified_replica, 0)
+            logging.info(f"Final replica count for pool {pool_name}: {replica_count}")
+            
             deployment = make_deployment(
                 pool_name,
                 placeholder_template,
