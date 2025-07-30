@@ -38,6 +38,9 @@ spec:
           args:
             - --config-file=/etc/scaler/config.yaml
             - --placeholder-template-file=/etc/scaler/placeholder-template.yaml
+          env:
+            - name: TZ
+              value: {{ .Values.calendarTimezone | default "UTC" }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
