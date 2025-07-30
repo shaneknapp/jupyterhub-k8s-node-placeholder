@@ -49,9 +49,15 @@ priorityClass:
 
 tolerations:
 
-# The URL of the public calendar to use for the node placeholder
+# The URL of the public calendar to use for the node placeholder.
 # calendarUrl:
-
+#   https://url/of/the/public/calendar.ics
+#
+# This should be the timezone of the calendar. This is to normalize all day
+# events, which don't have a timezone. If this is not set, the default timezone
+# for all day events will be UTC, and not the timezone of the calendar.
+# If not set, defaults to UTC
+# calendarTimezone: "America/Los_Angeles"
 
 # Calculate size of node placeholder by:
 # 1. Select a node in the node pool you want to configure
