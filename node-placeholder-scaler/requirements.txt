@@ -26,7 +26,7 @@ kiss-headers==2.5.0
     # via niquests
 niquests==3.7.2
     # via -r requirements.in
-pydantic==2.11.5
+pydantic==2.11.7
     # via ical
 pydantic-core==2.33.2
     # via pydantic
@@ -36,15 +36,15 @@ python-dateutil==2.9.0.post0
     # via ical
 pytz==2025.2
     # via datetime
-qh3==1.5.2
+qh3==1.5.3
     # via urllib3-future
-ruamel-yaml==0.18.12
+ruamel-yaml==0.18.14
     # via -r requirements.in
 ruamel-yaml-clib==0.2.12
     # via ruamel-yaml
 six==1.17.0
     # via python-dateutil
-typing-extensions==4.14.0
+typing-extensions==4.14.1
     # via
     #   pydantic
     #   pydantic-core
@@ -53,9 +53,9 @@ typing-inspection==0.4.1
     # via pydantic
 tzdata==2025.2
     # via ical
-urllib3==2.4.0
+urllib3==2.5.0
     # via -r requirements.in
-urllib3-future==2.12.922
+urllib3-future==2.13.900
     # via niquests
 wassima==1.2.2
     # via niquests

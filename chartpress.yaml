@@ -7,5 +7,5 @@ charts:
     images:
       node-placeholder-scaler:
         valuesPath: image
-        contextPath: .
-        dockerfilePath: ./Dockerfile
+        contextPath: ./node-placeholder-scaler
+        dockerfilePath: ./node-placeholder-scaler/Dockerfile

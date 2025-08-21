@@ -275,58 +275,61 @@ def main():
             placeholder_template = yaml.load(f)
 
         calendar = get_calendar(config["calendarUrl"])
-        events = get_events(calendar)
-        logging.info(f"Found {len(events)} events at {config['calendarUrl']}.")
 
-        replica_count_overrides = get_replica_counts(events)
-        logging.info(f"Overrides: {replica_count_overrides}")
+        if calendar:
+            events = get_events(calendar)
+            logging.info(f"Found {len(events)} events at {config['calendarUrl']}.")
 
-        # Generate deployment config based on our config
-        for pool_name, pool_config in config["nodePools"].items():
-            pool_usable_resources = usable_resources_result.get(pool_name + '-pool', {})
-            logging.info(f"Processing the node pool: '{pool_name}' ... ")
-            node_placeholder_deployment_reduction = 0
-            for node, resources in pool_usable_resources.items():
-                logging.info(f"Checking node {node} in pool {pool_name} ...")
-                logging.info(
-                    f"Node {node} has {resources['cpu_free_ratio']:.2f} CPU free ratio and {resources['mem_free_ratio']:.2f} Memory free ratio."
+            replica_count_overrides = get_replica_counts(events)
+            logging.info(f"Overrides: {replica_count_overrides}")
+
+            # Generate deployment config based on our config
+            for pool_name, pool_config in config["nodePools"].items():
+                pool_usable_resources = usable_resources_result.get(pool_name + '-pool', {})
+                logging.info(f"Processing the node pool: '{pool_name}' ... ")
+                node_placeholder_deployment_reduction = 0
+                for node, resources in pool_usable_resources.items():
+                    logging.info(f"Checking node {node} in pool {pool_name} ...")
+                    logging.info(
+                        f"Node {node} has {resources['cpu_free_ratio']:.2f} CPU free ratio and {resources['mem_free_ratio']:.2f} Memory free ratio."
+                    )
+                    # Check if a placeholder pod is running on this node
+                    if not placeholder_pod_running_on_node(node, namespace, label_selector):
+                        cpu_free_ratio = resources["cpu_free_ratio"]
+                        mem_free_ratio = resources["mem_free_ratio"]
+                        if cpu_free_ratio > 0.2 and mem_free_ratio > 0.2:
+                            logging.info(f"Node {node} has sufficient resources (CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio}).")
+                            node_placeholder_deployment_reduction += 1
+                    else:
+                        logging.info(f"Placeholder pod is running on node {node}. Skipping resource check for this node.")
+
+                calendar_replica_count = replica_count_overrides.get(pool_name, 0)
+                config_replica_count = pool_config["replicas"]
+                modified_replica = replica_count_overrides.get(pool_name,pool_config["replicas"]) - node_placeholder_deployment_reduction
+                logging.info(f"Calendar replica count for pool {pool_name}: {calendar_replica_count}")
+                logging.info(f"Config replica count for pool {pool_name}: {config_replica_count}")
+                logging.info(f"Reducing {pool_name} placeholder deployment replicas by {node_placeholder_deployment_reduction} based on node resources.")
+                replica_count = max(modified_replica, 0)
+                logging.info(f"Final replica count for pool {pool_name}: {replica_count}")
+
+                deployment = make_deployment(
+                    pool_name,
+                    placeholder_template,
+                    pool_config["nodeSelector"],
+                    pool_config["resources"],
+                    replica_count,
                 )
-                # Check if a placeholder pod is running on this node
-                if not placeholder_pod_running_on_node(node, namespace, label_selector):
-                    cpu_free_ratio = resources["cpu_free_ratio"]
-                    mem_free_ratio = resources["mem_free_ratio"]
-                    if cpu_free_ratio > 0.2 and mem_free_ratio > 0.2:
-                        logging.info(f"Node {node} has sufficient resources (CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio}).")
-                        node_placeholder_deployment_reduction += 1
-                else:
-                    logging.info(f"Placeholder pod is running on node {node}. Skipping resource check for this node.")
-            
-            calendar_replica_count = replica_count_overrides.get(pool_name, 0)
-            config_replica_count = pool_config["replicas"]
-            modified_replica = replica_count_overrides.get(pool_name,pool_config["replicas"]) - node_placeholder_deployment_reduction
-            logging.info(f"Calendar replica count for pool {pool_name}: {calendar_replica_count}")
-            logging.info(f"Config replica count for pool {pool_name}: {config_replica_count}")
-            logging.info(f"Reducing {pool_name} placeholder deployment replicas by {node_placeholder_deployment_reduction} based on node resources.")
-            replica_count = max(modified_replica, 0)
-            logging.info(f"Final replica count for pool {pool_name}: {replica_count}")
-            
-            deployment = make_deployment(
-                pool_name,
-                placeholder_template,
-                pool_config["nodeSelector"],
-                pool_config["resources"],
-                replica_count,
-            )
-            logging.info(f"Setting {pool_name} to have {replica_count} replicas")
-            with tempfile.NamedTemporaryFile(mode="r+") as f:
-                yaml.dump(deployment, f)
-                f.flush()
-                proc = subprocess.run(
-                    ["kubectl", "apply", "-f", f.name],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
+                logging.info(f"Setting {pool_name} to have {replica_count} replicas")
+                with tempfile.NamedTemporaryFile(mode="r+") as f:
+                    yaml.dump(deployment, f)
+                    f.flush()
+                    proc = subprocess.run(
+                        ["kubectl", "apply", "-f", f.name],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
 
-                logging.info(proc.stdout.strip())
+                    logging.info(proc.stdout.strip())
+
         time.sleep(60)
