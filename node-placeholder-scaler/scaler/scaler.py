@@ -288,7 +288,7 @@ def main():
                 pool_usable_resources = usable_resources_result.get(
                     pool_config["nodeSelector"]["hub.jupyter.org/pool-name"], {}
                 )
-                logging.info(f"Processing the node pool: '{pool_name}' ... ")
+                logging.info(f"Processing the node pool: {pool_name} ... ")
                 node_placeholder_deployment_reduction = 0
                 for node, resources in pool_usable_resources.items():
                     logging.info(f"Checking node {node} in pool {pool_name} ...")
