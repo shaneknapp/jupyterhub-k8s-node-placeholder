@@ -30,9 +30,9 @@ def parse_memory(q):
         return int(q[:-2])
     elif q.endswith("Gi"):
         return int(q[:-2]) * 1024
-    elif q.endswith('M'): # megabytes
+    elif q.endswith("M"):  # megabytes
         return int(q) * 1e6 // (1024 * 1024)
-    else: # Assume it is in Bytes
+    else:  # Assume it is in Bytes
         return int(q) // (1024 * 1024)  # Convert Bytes to MiB
 
 
@@ -74,7 +74,7 @@ def get_allocatable_resources_by_pool(node_to_pool_dict):
 
         try:
             # CPU might be in cores (e.g., "2"), so convert to millicores
-            if cpu_raw.endswith('m'):
+            if cpu_raw.endswith("m"):
                 cpu_m = int(cpu_raw[:-1])
             else:
                 cpu_m = int(float(cpu_raw) * 1000)
@@ -86,10 +86,7 @@ def get_allocatable_resources_by_pool(node_to_pool_dict):
         except ValueError:
             mem_mi = 0
 
-        pool_resources[pool][node_name] = {
-            "cpu_m": cpu_m,
-            "mem_mi": mem_mi
-        }
+        pool_resources[pool][node_name] = {"cpu_m": cpu_m, "mem_mi": mem_mi}
 
     return pool_resources
 
@@ -110,7 +107,6 @@ def get_requested_resources_by_pool(node_to_pool_dict):
 
         pool = node_to_pool_dict.get(node, "unknown-pool")
 
-
         if pool not in pool_resources:
             pool_resources[pool] = {}
 
@@ -130,7 +126,7 @@ def get_requested_resources_by_pool(node_to_pool_dict):
                 mem_mi = parse_memory(mem)
             except ValueError:
                 mem_mi = 0
-            
+
             pool_resources[pool][node]["cpu_m"] += cpu_m
             pool_resources[pool][node]["mem_mi"] += mem_mi
 
@@ -141,7 +137,6 @@ def get_usable_resources():
     node_to_pool_dict = get_node_pool_mapping()
     alloc = get_allocatable_resources_by_pool(node_to_pool_dict)
     requested_resources = get_requested_resources_by_pool(node_to_pool_dict)
-
 
     usable_resources_result = {}
     for pool, pool_info in alloc.items():
@@ -164,7 +159,7 @@ def get_usable_resources():
                 "mem_requested_mi": requested["mem_mi"],
                 "mem_free_mi": free_mem,
                 "mem_free_ratio": float(free_mem) / node_info["mem_mi"],
-                "node_pool": pool
+                "node_pool": pool,
             }
 
     return usable_resources_result
@@ -173,19 +168,24 @@ def get_usable_resources():
 def placeholder_pod_running_on_node(node_name, namespace, label_selector):
     try:
         cmd = [
-            "kubectl", "get", "pods",
-            "-n", namespace,
-            "-l", label_selector,
-            "-o", "json"
+            "kubectl",
+            "get",
+            "pods",
+            "-n",
+            namespace,
+            "-l",
+            label_selector,
+            "-o",
+            "json",
         ]
-        
+
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         pods = json.loads(result.stdout)
 
         for pod in pods.get("items", []):
             pod_node = pod.get("spec", {}).get("nodeName")
             pod_phase = pod.get("status", {}).get("phase")
-            
+
             if pod_node == node_name and pod_phase == "Running":
                 return True
 
@@ -257,11 +257,11 @@ def main():
     argparser.add_argument(
         "--placeholder-template-file", default="placeholder-template.yaml"
     )
+    argparser.add_argument("--namespace", default="node-placeholder")
 
     args = argparser.parse_args()
 
-    
-    namespace = "node-placeholder"
+    namespace = args.namespace
     label_selector = "app=node-placeholder-scaler,component=placeholder"
 
     while True:
@@ -285,7 +285,9 @@ def main():
 
             # Generate deployment config based on our config
             for pool_name, pool_config in config["nodePools"].items():
-                pool_usable_resources = usable_resources_result.get(pool_name + '-pool', {})
+                pool_usable_resources = usable_resources_result.get(
+                    pool_config["nodeSelector"]["hub.jupyter.org/pool-name"], {}
+                )
                 logging.info(f"Processing the node pool: '{pool_name}' ... ")
                 node_placeholder_deployment_reduction = 0
                 for node, resources in pool_usable_resources.items():
@@ -294,23 +296,40 @@ def main():
                         f"Node {node} has {resources['cpu_free_ratio']:.2f} CPU free ratio and {resources['mem_free_ratio']:.2f} Memory free ratio."
                     )
                     # Check if a placeholder pod is running on this node
-                    if not placeholder_pod_running_on_node(node, namespace, label_selector):
+                    if not placeholder_pod_running_on_node(
+                        node, namespace, label_selector
+                    ):
                         cpu_free_ratio = resources["cpu_free_ratio"]
                         mem_free_ratio = resources["mem_free_ratio"]
                         if cpu_free_ratio > 0.2 and mem_free_ratio > 0.2:
-                            logging.info(f"Node {node} has sufficient resources (CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio}).")
+                            logging.info(
+                                f"Node {node} has sufficient resources (CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio})."
+                            )
                             node_placeholder_deployment_reduction += 1
                     else:
-                        logging.info(f"Placeholder pod is running on node {node}. Skipping resource check for this node.")
+                        logging.info(
+                            f"Placeholder pod is running on node {node}. Skipping resource check for this node."
+                        )
 
                 calendar_replica_count = replica_count_overrides.get(pool_name, 0)
                 config_replica_count = pool_config["replicas"]
-                modified_replica = replica_count_overrides.get(pool_name,pool_config["replicas"]) - node_placeholder_deployment_reduction
-                logging.info(f"Calendar replica count for pool {pool_name}: {calendar_replica_count}")
-                logging.info(f"Config replica count for pool {pool_name}: {config_replica_count}")
-                logging.info(f"Reducing {pool_name} placeholder deployment replicas by {node_placeholder_deployment_reduction} based on node resources.")
+                modified_replica = (
+                    replica_count_overrides.get(pool_name, pool_config["replicas"])
+                    - node_placeholder_deployment_reduction
+                )
+                logging.info(
+                    f"Calendar replica count for pool {pool_name}: {calendar_replica_count}"
+                )
+                logging.info(
+                    f"Config replica count for pool {pool_name}: {config_replica_count}"
+                )
+                logging.info(
+                    f"Reducing {pool_name} placeholder deployment replicas by {node_placeholder_deployment_reduction} based on node resources."
+                )
                 replica_count = max(modified_replica, 0)
-                logging.info(f"Final replica count for pool {pool_name}: {replica_count}")
+                logging.info(
+                    f"Final replica count for pool {pool_name}: {replica_count}"
+                )
 
                 deployment = make_deployment(
                     pool_name,
@@ -331,5 +350,4 @@ def main():
                     )
 
                     logging.info(proc.stdout.strip())
-
         time.sleep(60)

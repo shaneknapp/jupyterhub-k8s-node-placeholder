@@ -38,6 +38,7 @@ spec:
           args:
             - --config-file=/etc/scaler/config.yaml
             - --placeholder-template-file=/etc/scaler/placeholder-template.yaml
+            - --namespace={{ .Release.Namespace }}
           env:
             - name: TZ
               value: {{ .Values.calendarTimezone | default "UTC" }}
