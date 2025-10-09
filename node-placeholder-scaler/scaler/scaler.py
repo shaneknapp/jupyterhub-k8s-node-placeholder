@@ -8,44 +8,26 @@ import json
 from copy import deepcopy
 
 from ruamel.yaml import YAML
-
 from .calendar import _event_repr, get_calendar, get_events
+from kubernetes import client, config
+from utils import parse_cpu, parse_memory
 
 yaml = YAML(typ="safe")
 
 
-def parse_cpu(q):
-    """Parse CPU quantity string and return value in millicores."""
-    if q.endswith("m"):
-        return int(q[:-1])
-    else:
-        return int(q) * 1000  # Convert cores to millicores
-
-
-def parse_memory(q):
-    """Parse memory quantity string and return value in MiB."""
-    if q.endswith("Ki"):
-        return int(int(q[:-2]) / 1024)
-    elif q.endswith("Mi"):
-        return int(q[:-2])
-    elif q.endswith("Gi"):
-        return int(q[:-2]) * 1024
-    elif q.endswith("M"):  # megabytes
-        return int(q) * 1e6 // (1024 * 1024)
-    else:  # Assume it is in Bytes
-        return int(q) // (1024 * 1024)  # Convert Bytes to MiB
-
-
 def get_node_pool_mapping(label_key="hub.jupyter.org/pool-name"):
     """Returns a mapping from node name to node pool label."""
-    cmd = ["kubectl", "get", "nodes", "-o", "json"]
-    output = subprocess.check_output(cmd).decode()
-    nodes = json.loads(output)["items"]
+    try:
+        config.load_incluster_config()
+    except config.ConfigException:
+        config.load_kube_config()
+    v1 = client.CoreV1Api()
+    nodes = v1.list_node().items
 
     node_to_pool = {}
     for node in nodes:
-        name = node["metadata"]["name"]
-        labels = node["metadata"].get("labels", {})
+        name = node.metadata.name
+        labels = node.metadata.labels or {}
         pool = labels.get(label_key, "unknown-pool")
         node_to_pool[name] = pool
 
@@ -55,20 +37,24 @@ def get_node_pool_mapping(label_key="hub.jupyter.org/pool-name"):
 def get_allocatable_resources_by_pool(node_to_pool_dict):
     """Returns dict: {pool: {node: {'cpu_m': int, 'mem_mi': int}}} with allocatable resources."""
 
-    cmd = ["kubectl", "get", "nodes", "-o", "json"]
-    output = subprocess.check_output(cmd).decode()
-    nodes_data = json.loads(output)["items"]
+    try:
+        config.load_incluster_config()
+    except config.ConfigException:
+        config.load_kube_config()
+
+    v1 = client.CoreV1Api()
 
     pool_resources = {}
+    nodes = v1.list_node().items
 
-    for node in nodes_data:
-        node_name = node["metadata"]["name"]
+    for node in nodes:
+        node_name = node.metadata.name
         pool = node_to_pool_dict.get(node_name, "unknown-pool")
 
         if pool not in pool_resources:
             pool_resources[pool] = {}
 
-        alloc = node["status"]["allocatable"]
+        alloc = node.status.allocatable or {}
         cpu_raw = alloc.get("cpu", "0")
         mem_raw = alloc.get("memory", "0")
 
@@ -94,14 +80,18 @@ def get_allocatable_resources_by_pool(node_to_pool_dict):
 def get_requested_resources_by_pool(node_to_pool_dict):
     """Returns dict: {pool: {node: {'cpu_m': int, 'mem_mi': int}}} with requested resources."""
 
-    cmd = ["kubectl", "get", "pods", "--all-namespaces", "-o", "json"]
-    output = subprocess.check_output(cmd).decode()
-    pod_data = json.loads(output)
+    try:
+        config.load_incluster_config()
+    except config.ConfigException:
+        config.load_kube_config()
+
+    v1 = client.CoreV1Api()
+    pods = v1.list_pod_for_all_namespaces().items
 
     pool_resources = {}
 
-    for pod in pod_data["items"]:
-        node = pod.get("spec", {}).get("nodeName")
+    for pod in pods:
+        node = pod.spec.node_name
         if not node:
             continue  # Pod not scheduled yet
 
@@ -113,10 +103,11 @@ def get_requested_resources_by_pool(node_to_pool_dict):
         if node not in pool_resources[pool]:
             pool_resources[pool][node] = {"cpu_m": 0, "mem_mi": 0}
 
-        for container in pod.get("spec", {}).get("containers", []):
-            resources = container.get("resources", {}).get("requests", {})
+        for container in pod.spec.containers:
+            resources = container.resources.requests or {}
             cpu = resources.get("cpu", "0")
             mem = resources.get("memory", "0")
+
             try:
                 cpu_m = parse_cpu(cpu)
             except ValueError:
@@ -167,35 +158,29 @@ def get_usable_resources():
 
 def placeholder_pod_running_on_node(node_name, namespace, label_selector):
     try:
-        cmd = [
-            "kubectl",
-            "get",
-            "pods",
-            "-n",
-            namespace,
-            "-l",
-            label_selector,
-            "-o",
-            "json",
-        ]
+        config.load_incluster_config()
+    except config.ConfigException:
+        config.load_kube_config()
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        pods = json.loads(result.stdout)
+    v1 = client.CoreV1Api()
 
-        for pod in pods.get("items", []):
-            pod_node = pod.get("spec", {}).get("nodeName")
-            pod_phase = pod.get("status", {}).get("phase")
+    try:
+        pods = v1.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=label_selector
+        ).items
+
+        for pod in pods:
+            pod_node = pod.spec.node_name
+            pod_phase = pod.status.phase
 
             if pod_node == node_name and pod_phase == "Running":
                 return True
 
         return False
 
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Error running kubectl: {e.stderr}")
-        return False
-    except json.JSONDecodeError:
-        logging.error("Failed to parse kubectl output as JSON.")
+    except client.exceptions.ApiException as e:
+        logging.error(f"Kubernetes API error: {e}")
         return False
 
 
@@ -258,11 +243,18 @@ def main():
         "--placeholder-template-file", default="placeholder-template.yaml"
     )
     argparser.add_argument("--namespace", default="node-placeholder")
+    argparser.add_argument("--node-pool-selector-key", default="hub.jupyter.org/pool-name")
+    argparser.add_argument("--placeholder-pod-label-selector", default="app=node-placeholder-scaler,component=placeholder")
+    argparser.add_argument("--cpu-threshold", type=float, default=0.2)
+    argparser.add_argument("--memory-threshold", type=float, default=0.2)
 
     args = argparser.parse_args()
 
     namespace = args.namespace
-    label_selector = "app=node-placeholder-scaler,component=placeholder"
+    label_selector = args.placeholder_pod_label_selector
+    node_selector_key = args.node_pool_selector_key
+    cpu_threshold = args.cpu_threshold
+    memory_threshold = args.memory_threshold
 
     while True:
         usable_resources_result = get_usable_resources()
@@ -286,7 +278,7 @@ def main():
             # Generate deployment config based on our config
             for pool_name, pool_config in config["nodePools"].items():
                 pool_usable_resources = usable_resources_result.get(
-                    pool_config["nodeSelector"]["hub.jupyter.org/pool-name"], {}
+                    pool_config["nodeSelector"][node_selector_key], {}
                 )
                 logging.info(f"Processing the node pool: {pool_name} ... ")
                 node_placeholder_deployment_reduction = 0
@@ -301,7 +293,7 @@ def main():
                     ):
                         cpu_free_ratio = resources["cpu_free_ratio"]
                         mem_free_ratio = resources["mem_free_ratio"]
-                        if cpu_free_ratio > 0.2 and mem_free_ratio > 0.2:
+                        if cpu_free_ratio > cpu_threshold and mem_free_ratio > memory_threshold:
                             logging.info(
                                 f"Node {node} has sufficient resources (CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio})."
                             )
