@@ -15,8 +15,7 @@ extends: default
 
 # ignore helm template files as yamllint doesn't like the Go templating
 ignore: |
-  **/template/**
-  **/templates/**
+  helm/**/templates/**
 
 rules:
   braces:
