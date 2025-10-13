@@ -4,7 +4,6 @@ import logging
 import subprocess
 import tempfile
 import time
-import json
 from copy import deepcopy
 
 from ruamel.yaml import YAML
@@ -166,8 +165,7 @@ def placeholder_pod_running_on_node(node_name, namespace, label_selector):
 
     try:
         pods = v1.list_namespaced_pod(
-            namespace=namespace,
-            label_selector=label_selector
+            namespace=namespace, label_selector=label_selector
         ).items
 
         for pod in pods:
@@ -243,8 +241,13 @@ def main():
         "--placeholder-template-file", default="placeholder-template.yaml"
     )
     argparser.add_argument("--namespace", default="node-placeholder")
-    argparser.add_argument("--node-pool-selector-key", default="hub.jupyter.org/pool-name")
-    argparser.add_argument("--placeholder-pod-label-selector", default="app=node-placeholder-scaler,component=placeholder")
+    argparser.add_argument(
+        "--node-pool-selector-key", default="hub.jupyter.org/pool-name"
+    )
+    argparser.add_argument(
+        "--placeholder-pod-label-selector",
+        default="app=node-placeholder-scaler,component=placeholder",
+    )
     argparser.add_argument("--cpu-threshold", type=float, default=0.2)
     argparser.add_argument("--memory-threshold", type=float, default=0.2)
 
@@ -293,7 +296,10 @@ def main():
                     ):
                         cpu_free_ratio = resources["cpu_free_ratio"]
                         mem_free_ratio = resources["mem_free_ratio"]
-                        if cpu_free_ratio > cpu_threshold and mem_free_ratio > memory_threshold:
+                        if (
+                            cpu_free_ratio > cpu_threshold
+                            and mem_free_ratio > memory_threshold
+                        ):
                             logging.info(
                                 f"Node {node} has sufficient resources (CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio})."
                             )
