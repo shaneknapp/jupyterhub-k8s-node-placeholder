@@ -6,10 +6,11 @@ import tempfile
 import time
 from copy import deepcopy
 
-from ruamel.yaml import YAML
-from .calendar import _event_repr, get_calendar, get_events
 from kubernetes import client, config
+from ruamel.yaml import YAML
 from utils import parse_cpu, parse_memory
+
+from .calendar import _event_repr, get_calendar, get_events
 
 yaml = YAML(typ="safe")
 
