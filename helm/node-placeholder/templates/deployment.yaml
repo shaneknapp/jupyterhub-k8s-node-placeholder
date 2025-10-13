@@ -38,6 +38,11 @@ spec:
           args:
             - --config-file=/etc/scaler/config.yaml
             - --placeholder-template-file=/etc/scaler/placeholder-template.yaml
+            - --namespace={{ .Release.Namespace }}
+            - --node-pool-selector-key={{ .Values.nodePoolSelectorKey }}
+            - --placeholder-pod-label-selector={{ .Values.placeholderPodLabelSelector }}
+            - --cpu-threshold={{ .Values.cpuThreshold }}
+            - --memory-threshold={{ .Values.memoryThreshold }}
           env:
             - name: TZ
               value: {{ .Values.calendarTimezone | default "UTC" }}
