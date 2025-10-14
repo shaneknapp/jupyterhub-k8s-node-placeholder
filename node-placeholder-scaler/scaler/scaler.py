@@ -8,9 +8,9 @@ from copy import deepcopy
 
 from kubernetes import client, config
 from ruamel.yaml import YAML
-from utils import parse_cpu, parse_memory
 
-from .calendar import _event_repr, get_calendar, get_events
+from .calendar_parser import _event_repr, get_calendar, get_events
+from .utils import parse_cpu, parse_memory
 
 yaml = YAML(typ="safe")
 
