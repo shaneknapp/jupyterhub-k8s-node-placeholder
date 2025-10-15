@@ -80,7 +80,7 @@ tolerations:
 # $ kubectl get -A pod -l 'component!=user-placeholder' \
 #   --field-selector spec.nodeName=${NODE} \
 #   -o jsonpath='{range .items[*].spec.containers[*]}{.name}{"\t"}{.resources.requests.memory}{"\n"}{end}' | \
-#   egrep -v 'pause|notebook' # convert all values to bytes for easier mathing
+#   egrep -v 'pause|notebook' # convert all values to bytes for easier matching
 # calico-node
 # fluentbit       100Mi
 # fluentbit-gke   100Mi
