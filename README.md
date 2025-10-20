@@ -38,12 +38,12 @@ calendarUrl: https://url.to/your/public/calendar.ics
 calendarTimezone: "America/Los_Angeles"
 
 nodePools:
-  # The short name of the node pool, used in the calendar event description
+  # The short name of the node pool, used in the calendar event description.
   # In this example, we have a node pool named "user-pool" that contains our
   # Jupyterhub singleuser nodes:
   user:
     nodeSelector:
-    hub.jupyter.org/pool-name: base-pool
+    hub.jupyter.org/pool-name: user-pool
     resources:
     requests:
         # Some value slightly lower than allocatable RAM on the nodepool in bytes
