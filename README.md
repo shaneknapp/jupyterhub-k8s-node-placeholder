@@ -1,6 +1,60 @@
-# jupyterhub-k8s-node-placeholder
+# Jupyterhub K8s Calendar Node Placeholder
 
-This repository contains a Helm chart for deploying a JupyterHub Node Placeholder service on a Kubernetes cluster. The Node Placeholder service is designed to manage and allocate placeholder nodes for JupyterHub users, ensuring efficient resource utilization and improved user experience.
+This repository contains a Helm chart for deploying a JupyterHub Node Placeholder service on a Kubernetes cluster. The Node Placeholder service is designed to manage and allocate placeholder nodes for JupyterHub users, ensuring efficient resource utilization and improved user experience during surge login events.
+
+The Node Placeholder service works by monitoring the academic calendar events from a provided iCal URL. Based on the events, it dynamically adjusts the number of placeholder nodes available in the Kubernetes cluster, allowing JupyterHub to pre-allocate resources for anticipated user logins. If there are existing user nodes deployed, and these have the capacity to handle additional users, the Node Placeholder service will scale down the number of placeholder nodes accordingly.
+
+The events are fetched from the iCal URL and parsed to determine peak usage times, such as the start of exam periods or other significant academic events where you expect a large number of users to log in. The service then scales the number of placeholder nodes accordingly, ensuring that users have a seamless experience when logging into JupyterHub during these high-demand periods.
+
+When creating these events, they only need to be scheduled for the exact time periods where you expect a surge in logins. For instance, if you expect a surge of logins before a 9am exam, the event should be scheduled to start at 8:50am and end at 9:10am. This allows the Node Placeholder service to allocate resources just in time for the expected demand.
+
+An example calendar entry for an event might look like this:
+
+``` yaml
+pool1: 2
+pool2: 1
+```
+
+This indicates that during the event, 2 placeholder nodes should be allocated from `pool1` and 1 placeholder node from `pool2`.
+
+## Installation
+
+JupyterHub K8S Node Placeholder is installed as a Helm chart.
+
+### Requirements
+
+- Jupyterhub running on Kubernetes
+- A publicly accessible iCal URL containing the academic calendar events (eg: Google Calendar, Outlook Calendar)
+- Helm 3.x installed on your local machine or CI/CD pipeline
+
+### Example Helm Configuration
+
+An example configuration in `values.yaml` might look like this:
+
+``` yaml
+# The URL of the public calendar to use for the node placeholder
+calendarUrl: https://url.to/your/public/calendar.ics
+
+calendarTimezone: "America/Los_Angeles"
+
+nodePools:
+  # The short name of the node pool, used in the calendar event description
+  # In this example, we have a node pool named "user-pool" that contains our
+  # Jupyterhub singleuser nodes:
+  user:
+    nodeSelector:
+    hub.jupyter.org/pool-name: base-pool
+    resources:
+    requests:
+        # Some value slightly lower than allocatable RAM on the nodepool in bytes
+        # This is an example using a GCP n2-highmem-8 node with 64G of RAM allocatable
+        memory: 60929654784
+    replicas: 1
+```
+
+### Installation with Helm
+
+
 
 ## Features
 
