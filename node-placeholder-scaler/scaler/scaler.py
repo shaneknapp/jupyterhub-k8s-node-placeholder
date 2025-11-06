@@ -251,6 +251,9 @@ def main():
     )
     argparser.add_argument("--cpu-threshold", type=float, default=0.2)
     argparser.add_argument("--memory-threshold", type=float, default=0.2)
+    argparser.add_argument(
+        "--strategy", choices=["cpu", "mem", "balanced"], default="balanced"
+    )
 
     args = argparser.parse_args()
 
@@ -259,6 +262,7 @@ def main():
     node_selector_key = args.node_pool_selector_key
     cpu_threshold = args.cpu_threshold
     memory_threshold = args.memory_threshold
+    strategy = args.strategy
 
     while True:
         usable_resources_result = get_usable_resources()
@@ -298,11 +302,18 @@ def main():
                         cpu_free_ratio = resources["cpu_free_ratio"]
                         mem_free_ratio = resources["mem_free_ratio"]
                         if (
-                            cpu_free_ratio > cpu_threshold
-                            and mem_free_ratio > memory_threshold
+                            (strategy == "cpu" and cpu_free_ratio > cpu_threshold)
+                            or (strategy == "mem" and mem_free_ratio > memory_threshold)
+                            or (
+                                strategy == "balanced"
+                                and (
+                                    cpu_free_ratio > cpu_threshold
+                                    and mem_free_ratio > memory_threshold
+                                )
+                            )
                         ):
                             logging.info(
-                                f"Node {node} has sufficient resources (CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio})."
+                                f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio})."
                             )
                             node_placeholder_deployment_reduction += 1
                     else:
