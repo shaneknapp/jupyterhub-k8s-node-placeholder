@@ -44,7 +44,7 @@ calendarUrl: https://url.to/your/public/calendar.ics
 
 calendarTimezone: "America/Los_Angeles"
 
-scalingStrategy: mem  # Options: cpu, mem, balanced
+scalingStrategy: mem  # Options: cpu, mem, balanced (default)
 
 nodePools:
   # The short name of the node pool, used in the calendar event description.
