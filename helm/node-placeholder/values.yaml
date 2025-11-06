@@ -122,3 +122,4 @@ nodePoolSelectorKey: hub.jupyter.org/pool-name
 placeholderPodLabelSelector: "app=node-placeholder-scaler,component=placeholder"
 cpuThreshold: 0.2
 memoryThreshold: 0.2
+scalingStrategy: balanced
