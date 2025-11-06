@@ -4,6 +4,11 @@ This repository contains a Helm chart for deploying a JupyterHub Node Placeholde
 
 The Node Placeholder service works by monitoring the academic calendar events from a provided iCal URL. Based on the events, it dynamically adjusts the number of placeholder nodes available in the Kubernetes cluster, allowing JupyterHub to pre-allocate resources for anticipated user logins. If there are existing user nodes deployed, and these have the capacity to handle additional users, the Node Placeholder service will scale down the number of placeholder nodes accordingly.
 
+:::{admonition} Be careful with time zones!
+:class: warning
+Be sure that the time zone of your public calendar matches the time zone set in the Helm chart values (`calendarTimezone`)!
+:::
+
 If any existing nodes are underutilized, the Node Placeholder service will also scale down the number of placeholder nodes to free up resources. Currently, it will not scale up a new placeholder node if any existing user nodes have > 20% of both CPU and RAM available. This is customizable in the the helm chart values (`values.yaml`).
 
 The events are fetched from the iCal URL and parsed to determine peak usage times, such as the start of exam periods or other significant academic events where you expect a large number of users to log in. The service then scales the number of placeholder nodes accordingly, ensuring that users have a seamless experience when logging into JupyterHub during these high-demand periods.
@@ -38,6 +43,8 @@ An example configuration in `values.yaml` might look like this:
 calendarUrl: https://url.to/your/public/calendar.ics
 
 calendarTimezone: "America/Los_Angeles"
+
+scalingStrategy: mem  # Options: cpu, mem, balanced
 
 nodePools:
   # The short name of the node pool, used in the calendar event description.
