@@ -110,8 +110,7 @@ helm upgrade --install --namespace node-placeholder-scaler --create-namespace no
 
 ## Features
 
-
-
+TODO
 
 ## Working with this repository
 
