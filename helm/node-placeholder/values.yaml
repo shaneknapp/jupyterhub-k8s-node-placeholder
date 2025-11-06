@@ -49,6 +49,12 @@ priorityClass:
 
 tolerations:
 
+nodePoolSelectorKey: hub.jupyter.org/pool-name
+placeholderPodLabelSelector: "app=node-placeholder-scaler,component=placeholder"
+cpuThreshold: 0.2
+memoryThreshold: 0.2
+scalingStrategy: balanced # Options: cpu, mem, balanced (default)
+
 # The URL of the public calendar to use for the node placeholder.
 # calendarUrl:
 #   https://url/of/the/public/calendar.ics
@@ -117,9 +123,3 @@ tolerations:
 #           # This is an example using a GCP n2-highmem-8 node with 64G of RAM allocatable
 #           memory: 60929654784
 #       replicas: 0
-
-nodePoolSelectorKey: hub.jupyter.org/pool-name
-placeholderPodLabelSelector: "app=node-placeholder-scaler,component=placeholder"
-cpuThreshold: 0.2
-memoryThreshold: 0.2
-scalingStrategy: balanced # Options: cpu, mem, balanced (default)
