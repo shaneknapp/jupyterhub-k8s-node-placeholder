@@ -43,6 +43,7 @@ spec:
             - --placeholder-pod-label-selector={{ .Values.placeholderPodLabelSelector }}
             - --cpu-threshold={{ .Values.cpuThreshold }}
             - --memory-threshold={{ .Values.memoryThreshold }}
+            - --strategy={{ .Values.scalingStrategy | default "balanced" }}
           env:
             - name: TZ
               value: {{ .Values.calendarTimezone | default "UTC" }}
