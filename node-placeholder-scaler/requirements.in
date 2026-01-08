@@ -4,4 +4,4 @@ ical==5.0.0
 kubernetes==32.0.1
 niquests==3.7.2
 ruamel.yaml
-urllib3==2.5.0
+urllib3==2.6.3
