@@ -3,7 +3,7 @@
 import datetime
 import zoneinfo
 
-import scaler.calendar
+import scaler.calendar_parser
 
 
 def test_calendar_events():
@@ -23,12 +23,16 @@ def test_calendar_events():
     )
 
     # this is a public calendar with known events
-    calendar = scaler.calendar.get_calendar(
+    calendar = scaler.calendar_parser.get_calendar(
         "https://calendar.google.com/calendar/ical/c_s47m3m1nuj3s81187k3b2b5s5o%40group.calendar.google.com/public/basic.ics"
     )
-    zero_events = scaler.calendar.get_events(calendar, time=zero_events_noon_june)
-    one_event = scaler.calendar.get_events(calendar, time=one_event_five_pm_april)
-    three_events = scaler.calendar.get_events(
+    zero_events = scaler.calendar_parser.get_events(
+        calendar, time=zero_events_noon_june
+    )
+    one_event = scaler.calendar_parser.get_events(
+        calendar, time=one_event_five_pm_april
+    )
+    three_events = scaler.calendar_parser.get_events(
         calendar, time=three_events_eight_thirty_pm_march
     )
 
