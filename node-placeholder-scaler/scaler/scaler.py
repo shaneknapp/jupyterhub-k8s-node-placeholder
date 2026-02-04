@@ -336,7 +336,7 @@ def main():
                             )
                         ):
                             logging.info(
-                                f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio})."
+                                f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio:.2f}, Memory free ratio: {mem_free_ratio:.2f})."
                             )
                             node_placeholder_deployment_reduction += 1
                     else:
