@@ -183,7 +183,7 @@ def placeholder_pod_running_on_node(node_name, namespace, label_selector):
         return False
 
 
-def is_cordoned_node(node_name):
+def is_unschedulable_node(node_name):
     try:
         config.load_incluster_config()
     except config.ConfigException:
@@ -195,7 +195,6 @@ def is_cordoned_node(node_name):
         node = v1.read_node(name=node_name)
         unschedulable = node.spec.unschedulable
         if unschedulable:
-            logging.info(f"Node {node_name} unschedulable: {unschedulable}")
             return True
         return False
 
@@ -320,9 +319,9 @@ def main():
                     placeholder_pod_running = placeholder_pod_running_on_node(
                         node, namespace, label_selector
                     )
-                    # Check if the node is cordoned
-                    cordoned_node = is_cordoned_node(node)
-                    if not placeholder_pod_running and not cordoned_node:
+                    # Check if the node is unschedulable
+                    unschedulable_node = is_unschedulable_node(node)
+                    if not placeholder_pod_running and not unschedulable_node:
                         cpu_free_ratio = resources["cpu_free_ratio"]
                         mem_free_ratio = resources["mem_free_ratio"]
                         if (
@@ -344,9 +343,9 @@ def main():
                         logging.info(
                             f"Placeholder pod is running on node {node}. Skipping resource check for this node."
                         )
-                    elif cordoned_node:
+                    elif unschedulable_node:
                         logging.info(
-                            f"Node {node} is cordoned. Skipping resource check for this node."
+                            f"Node {node} is unschedulable. Skipping resource check for this node."
                         )
                     else:
                         logging.info(
