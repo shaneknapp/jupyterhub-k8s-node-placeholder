@@ -183,6 +183,26 @@ def placeholder_pod_running_on_node(node_name, namespace, label_selector):
         return False
 
 
+def is_unschedulable_node(node_name):
+    try:
+        config.load_incluster_config()
+    except config.ConfigException:
+        config.load_kube_config()
+
+    v1 = client.CoreV1Api()
+
+    try:
+        node = v1.read_node(name=node_name)
+        unschedulable = node.spec.unschedulable
+        if unschedulable:
+            return True
+        return False
+
+    except client.exceptions.ApiException as e:
+        logging.error(f"Kubernetes API error: {e}")
+        return False
+
+
 def make_deployment(pool_name, template, node_selector, resources, replicas):
     deployment_name = f"{pool_name}-placeholder"
     deployment = deepcopy(template)
@@ -296,9 +316,12 @@ def main():
                         f"Node {node} has {resources['cpu_free_ratio']:.2f} CPU free ratio and {resources['mem_free_ratio']:.2f} Memory free ratio."
                     )
                     # Check if a placeholder pod is running on this node
-                    if not placeholder_pod_running_on_node(
+                    placeholder_pod_running = placeholder_pod_running_on_node(
                         node, namespace, label_selector
-                    ):
+                    )
+                    # Check if the node is unschedulable
+                    unschedulable_node = is_unschedulable_node(node)
+                    if not placeholder_pod_running and not unschedulable_node:
                         cpu_free_ratio = resources["cpu_free_ratio"]
                         mem_free_ratio = resources["mem_free_ratio"]
                         if (
@@ -313,12 +336,12 @@ def main():
                             )
                         ):
                             logging.info(
-                                f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio})."
+                                f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio:.2f}, Memory free ratio: {mem_free_ratio:.2f})."
                             )
                             node_placeholder_deployment_reduction += 1
                     else:
                         logging.info(
-                            f"Placeholder pod is running on node {node}. Skipping resource check for this node."
+                            f"Placeholder pod is running or {node} is unschedulable. Skipping resource check for this node."
                         )
 
                 calendar_replica_count = replica_count_overrides.get(pool_name, 0)
