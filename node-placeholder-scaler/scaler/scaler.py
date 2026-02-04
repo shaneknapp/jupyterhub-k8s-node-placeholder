@@ -339,17 +339,9 @@ def main():
                                 f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio}, Memory free ratio: {mem_free_ratio})."
                             )
                             node_placeholder_deployment_reduction += 1
-                    elif placeholder_pod_running:
-                        logging.info(
-                            f"Placeholder pod is running on node {node}. Skipping resource check for this node."
-                        )
-                    elif unschedulable_node:
-                        logging.info(
-                            f"Node {node} is unschedulable. Skipping resource check for this node."
-                        )
                     else:
                         logging.info(
-                            "something bad happened and we should never see this"
+                            f"Placeholder pod is running or {node} is unschedulable. Skipping resource check for this node."
                         )
 
                 calendar_replica_count = replica_count_overrides.get(pool_name, 0)
