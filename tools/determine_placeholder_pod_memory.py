@@ -51,7 +51,7 @@ def main():
 
     # determine total memory requests of all non-placeholder, non-notebook pods on the node
     pods = v1.list_pod_for_all_namespaces(
-        label_selector="component!=user-placeholder",
+        label_selector="component!=placeholder",
         field_selector=f"spec.nodeName={node}",
     )
 
