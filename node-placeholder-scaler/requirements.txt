@@ -25,7 +25,7 @@ h11==0.16.0
     # via urllib3-future
 ical==5.0.0
     # via -r requirements.in
-idna==3.11
+idna==3.16
     # via
     #   niquests
     #   requests
@@ -57,7 +57,7 @@ pyyaml==6.0.3
     # via kubernetes
 qh3==1.6.0
     # via urllib3-future
-requests==2.32.5
+requests==2.34.2
     # via
     #   kubernetes
     #   requests-oauthlib
@@ -78,7 +78,7 @@ typing-inspection==0.4.2
     # via pydantic
 tzdata==2025.3
     # via ical
-urllib3==2.6.3
+urllib3==2.7.0
     # via
     #   -r requirements.in
     #   kubernetes
