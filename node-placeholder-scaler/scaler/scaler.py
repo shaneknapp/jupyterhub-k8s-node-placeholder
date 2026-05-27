@@ -183,6 +183,57 @@ def placeholder_pod_running_on_node(node_name, namespace, label_selector):
         return False
 
 
+def any_placeholder_pod_pending(namespace, label_selector, node_selector):
+    """Returns True if any placeholder pod for the given pool is Pending.
+
+    Filters by node_selector to avoid suppressing reduction in unrelated pools.
+    """
+    try:
+        config.load_incluster_config()
+    except config.ConfigException:
+        config.load_kube_config()
+
+    v1 = client.CoreV1Api()
+
+    try:
+        pods = v1.list_namespaced_pod(
+            namespace=namespace, label_selector=label_selector
+        ).items
+
+        for pod in pods:
+            if (
+                pod.status.phase == "Pending"
+                and pod.spec.node_selector == node_selector
+            ):
+                return True
+
+        return False
+
+    except client.exceptions.ApiException as e:
+        logging.error(f"Kubernetes API error: {e}")
+        return False
+
+
+def compute_replica_count(
+    modified_replica,
+    config_replica_count,
+    calendar_replica_count,
+    calendar_override_enabled,
+    has_pending_placeholder=False,
+):
+    """Return the target placeholder replica count for a pool.
+
+    Calendar override takes priority. If a placeholder pod is Pending (evicted
+    but not yet rescheduled), suppress reduction so the deployment isn't scaled
+    down during the window before the pod finds a new home.
+    """
+    if calendar_replica_count > 0 and calendar_override_enabled:
+        return max(calendar_replica_count, 0)
+    if has_pending_placeholder:
+        return config_replica_count
+    return max(modified_replica, 0)
+
+
 def is_unschedulable_node(node_name):
     try:
         config.load_incluster_config()
@@ -355,23 +406,33 @@ def main():
                     replica_count_overrides.get(pool_name, pool_config["replicas"])
                     - node_placeholder_deployment_reduction
                 )
+                has_pending_placeholder = any_placeholder_pod_pending(
+                    namespace, label_selector, pool_config["nodeSelector"]
+                )
                 logging.info(
                     f"Calendar replica count for pool {pool_name}: {calendar_replica_count}"
                 )
-
-                if calendar_replica_count > 0 and calendar_override_enabled:
+                logging.info(
+                    f"Config replica count for pool {pool_name}: {config_replica_count}"
+                )
+                logging.info(
+                    f"Pending placeholder pod detected for pool {pool_name}: {has_pending_placeholder}"
+                )
+                if has_pending_placeholder:
                     logging.info(
-                        f"Overriding config replica count for pool {pool_name} with calendar replica count {calendar_replica_count} instead of modified replica count: {modified_replica}."
+                        f"Suppressing reduction for pool {pool_name}: placeholder pod is Pending."
                     )
-                    replica_count = max(calendar_replica_count, 0)
                 else:
-                    logging.info(
-                        f"Config replica count for pool {pool_name}: {config_replica_count}"
-                    )
                     logging.info(
                         f"Reducing {pool_name} placeholder deployment replicas by {node_placeholder_deployment_reduction} based on node resources."
                     )
-                    replica_count = max(modified_replica, 0)
+                replica_count = compute_replica_count(
+                    modified_replica,
+                    config_replica_count,
+                    calendar_replica_count,
+                    calendar_override_enabled,
+                    has_pending_placeholder,
+                )
                 logging.info(
                     f"Final replica count for pool {pool_name}: {replica_count}"
                 )

@@ -11,6 +11,8 @@ from unittest.mock import MagicMock, patch
 from kubernetes.client.exceptions import ApiException
 from kubernetes.config import ConfigException
 from scaler.scaler import (
+    any_placeholder_pod_pending,
+    compute_replica_count,
     get_allocatable_resources_by_pool,
     get_node_pool_mapping,
     get_replica_counts,
@@ -690,3 +692,113 @@ class TestIsUnschedulableNode:
         mock_api_cls.return_value.read_node.assert_called_once_with(
             name="my-special-node"
         )
+
+
+# ---------------------------------------------------------------------------
+# any_placeholder_pod_pending
+# ---------------------------------------------------------------------------
+
+_NODE_SELECTOR = {"hub.jupyter.org/pool-name": "pool-a"}
+_OTHER_NODE_SELECTOR = {"hub.jupyter.org/pool-name": "pool-b"}
+
+
+def _pending_pod(node_selector=None):
+    p = MagicMock()
+    p.status.phase = "Pending"
+    p.spec.node_selector = node_selector or _NODE_SELECTOR
+    return p
+
+
+class TestAnyPlaceholderPodPending:
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_no_pods_returns_false(self, mock_api_cls, mock_incluster, mock_kube):
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = []
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is False
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_running_pod_returns_false(self, mock_api_cls, mock_incluster, mock_kube):
+        mock_incluster.side_effect = ConfigException()
+        p = MagicMock()
+        p.status.phase = "Running"
+        p.spec.node_selector = _NODE_SELECTOR
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = [p]
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is False
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_pending_pod_matching_pool_returns_true(
+        self, mock_api_cls, mock_incluster, mock_kube
+    ):
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = [
+            _pending_pod(_NODE_SELECTOR)
+        ]
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is True
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_pending_pod_different_pool_returns_false(
+        self, mock_api_cls, mock_incluster, mock_kube
+    ):
+        """Pending pod from a different pool must not suppress reduction for this pool."""
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = [
+            _pending_pod(_OTHER_NODE_SELECTOR)
+        ]
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is False
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_api_error_returns_false(self, mock_api_cls, mock_incluster, mock_kube):
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_namespaced_pod.side_effect = ApiException()
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is False
+
+
+# ---------------------------------------------------------------------------
+# compute_replica_count
+# ---------------------------------------------------------------------------
+
+
+class TestComputeReplicaCount:
+    def test_normal_no_reduction(self):
+        assert compute_replica_count(1, 1, 0, False) == 1
+
+    def test_normal_with_reduction(self):
+        """When a node has spare capacity, reduction brings count to 0."""
+        assert compute_replica_count(0, 1, 0, False) == 0
+
+    def test_pending_suppresses_reduction(self):
+        """Race condition: placeholder evicted but not yet rescheduled."""
+        assert compute_replica_count(0, 1, 0, False, has_pending_placeholder=True) == 1
+
+    def test_pending_returns_config_not_modified(self):
+        """Floor is config_replica_count, not modified_replica, when pending."""
+        assert compute_replica_count(-1, 2, 0, False, has_pending_placeholder=True) == 2
+
+    def test_calendar_override_takes_priority(self):
+        assert compute_replica_count(0, 1, 3, True) == 3
+
+    def test_calendar_override_ignores_pending(self):
+        """Calendar override is authoritative; pending state doesn't change it."""
+        assert compute_replica_count(0, 1, 3, True, has_pending_placeholder=True) == 3
+
+    def test_calendar_count_zero_falls_through(self):
+        """calendar_replica_count=0 means no active calendar event; use normal path."""
+        assert compute_replica_count(1, 1, 0, True) == 1
+
+    def test_calendar_disabled_falls_through(self):
+        """calendar_override_enabled=False means ignore calendar count."""
+        assert compute_replica_count(0, 1, 3, False) == 0
+
+    def test_modified_replica_floored_at_zero(self):
+        """Without pending, result is never negative."""
+        assert compute_replica_count(-1, 1, 0, False) == 0
