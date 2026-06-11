@@ -184,6 +184,18 @@ class TestGetReplicaCounts:
         result = get_replica_counts([ev1, ev2])
         assert result == {"pool-a": 3, "pool-b": 5, "pool-c": 2}
 
+    def test_negative_count_accepted(self):
+        """Negative counts are stored as-is; compute_replica_count floors the result at 0."""
+        ev = _event("pool-a: -1\n")
+        assert get_replica_counts([ev]) == {"pool-a": -1}
+
+    def test_zero_count_stored_but_not_used_as_override(self):
+        """Zero is a valid integer and is stored, but compute_replica_count treats
+        calendar_replica_count=0 as 'no active event' and falls through to normal scaling.
+        """
+        ev = _event("pool-a: 0\n")
+        assert get_replica_counts([ev]) == {"pool-a": 0}
+
 
 # ---------------------------------------------------------------------------
 # get_node_pool_mapping
@@ -355,6 +367,19 @@ class TestGetAllocatableResourcesByPool:
             {"node-1": "pool-a", "node-2": "pool-a"}
         )
         assert len(result["pool-a"]) == 2
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_invalid_memory_defaults_to_zero(
+        self, mock_api_cls, mock_incluster, mock_kube
+    ):
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_node.return_value.items = [
+            _alloc_node("node-1", "2", "bad-memory")
+        ]
+        result = get_allocatable_resources_by_pool({"node-1": "pool-a"})
+        assert result["pool-a"]["node-1"]["mem_mi"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +563,71 @@ class TestGetUsableResources:
         result = get_usable_resources()
         assert result["pool-a"]["node-1"]["cpu_free_m"] == 1500
         assert result["pool-b"]["node-2"]["cpu_free_m"] == 6000
+
+    @patch("scaler.scaler.get_requested_resources_by_pool")
+    @patch("scaler.scaler.get_allocatable_resources_by_pool")
+    @patch("scaler.scaler.get_node_pool_mapping")
+    def test_pool_absent_from_requested(self, mock_mapping, mock_alloc, mock_req):
+        """Pool exists in alloc but has no pods — requested omits it entirely."""
+        mock_mapping.return_value = {"node-1": "pool-a"}
+        mock_alloc.return_value = {
+            "pool-a": {"node-1": {"cpu_m": 4000, "mem_mi": 8192}}
+        }
+        mock_req.return_value = {}
+
+        result = get_usable_resources()
+        node = result["pool-a"]["node-1"]
+        assert node["cpu_free_m"] == 4000
+        assert node["mem_free_mi"] == 8192
+        assert node["cpu_free_ratio"] == 1.0
+        assert node["mem_free_ratio"] == 1.0
+
+    @patch("scaler.scaler.get_requested_resources_by_pool")
+    @patch("scaler.scaler.get_allocatable_resources_by_pool")
+    @patch("scaler.scaler.get_node_pool_mapping")
+    def test_node_absent_from_requested_pool(self, mock_mapping, mock_alloc, mock_req):
+        """Pool exists in requested but this specific node has no pods."""
+        mock_mapping.return_value = {"node-1": "pool-a", "node-2": "pool-a"}
+        mock_alloc.return_value = {
+            "pool-a": {
+                "node-1": {"cpu_m": 4000, "mem_mi": 8192},
+                "node-2": {"cpu_m": 4000, "mem_mi": 8192},
+            }
+        }
+        mock_req.return_value = {"pool-a": {"node-1": {"cpu_m": 1000, "mem_mi": 2048}}}
+
+        result = get_usable_resources()
+        assert result["pool-a"]["node-1"]["cpu_free_m"] == 3000
+        assert result["pool-a"]["node-2"]["cpu_free_m"] == 4000
+        assert result["pool-a"]["node-2"]["cpu_free_ratio"] == 1.0
+
+    @patch("scaler.scaler.get_requested_resources_by_pool")
+    @patch("scaler.scaler.get_allocatable_resources_by_pool")
+    @patch("scaler.scaler.get_node_pool_mapping")
+    def test_zero_allocatable_cpu_no_division_error(
+        self, mock_mapping, mock_alloc, mock_req
+    ):
+        """cpu_m=0 (e.g. parse failure) must not raise ZeroDivisionError."""
+        mock_mapping.return_value = {"node-1": "pool-a"}
+        mock_alloc.return_value = {"pool-a": {"node-1": {"cpu_m": 0, "mem_mi": 8192}}}
+        mock_req.return_value = {"pool-a": {"node-1": {"cpu_m": 0, "mem_mi": 0}}}
+
+        result = get_usable_resources()
+        assert result["pool-a"]["node-1"]["cpu_free_ratio"] == 0.0
+
+    @patch("scaler.scaler.get_requested_resources_by_pool")
+    @patch("scaler.scaler.get_allocatable_resources_by_pool")
+    @patch("scaler.scaler.get_node_pool_mapping")
+    def test_zero_allocatable_mem_no_division_error(
+        self, mock_mapping, mock_alloc, mock_req
+    ):
+        """mem_mi=0 (e.g. parse failure) must not raise ZeroDivisionError."""
+        mock_mapping.return_value = {"node-1": "pool-a"}
+        mock_alloc.return_value = {"pool-a": {"node-1": {"cpu_m": 4000, "mem_mi": 0}}}
+        mock_req.return_value = {"pool-a": {"node-1": {"cpu_m": 0, "mem_mi": 0}}}
+
+        result = get_usable_resources()
+        assert result["pool-a"]["node-1"]["mem_free_ratio"] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -761,6 +851,38 @@ class TestAnyPlaceholderPodPending:
         mock_incluster.side_effect = ConfigException()
         mock_api_cls.return_value.list_namespaced_pod.side_effect = ApiException()
         assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is False
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_namespace_and_label_selector_passed_to_api(
+        self, mock_api_cls, mock_incluster, mock_kube
+    ):
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = []
+        any_placeholder_pod_pending(
+            "my-ns", "app=ph,component=placeholder", _NODE_SELECTOR
+        )
+        mock_api_cls.return_value.list_namespaced_pod.assert_called_once_with(
+            namespace="my-ns", label_selector="app=ph,component=placeholder"
+        )
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_multiple_pods_one_pending_matching_returns_true(
+        self, mock_api_cls, mock_incluster, mock_kube
+    ):
+        """Returns True when one of several pods is Pending and matches the pool."""
+        mock_incluster.side_effect = ConfigException()
+        running = MagicMock()
+        running.status.phase = "Running"
+        running.spec.node_selector = _NODE_SELECTOR
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = [
+            running,
+            _pending_pod(_NODE_SELECTOR),
+        ]
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is True
 
 
 # ---------------------------------------------------------------------------

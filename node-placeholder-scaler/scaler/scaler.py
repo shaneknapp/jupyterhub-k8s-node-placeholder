@@ -138,18 +138,22 @@ def get_usable_resources():
             if node not in usable_resources_result[pool]:
                 usable_resources_result[pool][node] = {}
 
-            requested = requested_resources.get(pool).get(node)
-            free_cpu = node_info["cpu_m"] - requested["cpu_m"]
-            free_mem = node_info["mem_mi"] - requested["mem_mi"]
+            requested = requested_resources.get(pool, {}).get(
+                node, {"cpu_m": 0, "mem_mi": 0}
+            )
+            cpu_alloc = node_info["cpu_m"]
+            mem_alloc = node_info["mem_mi"]
+            free_cpu = cpu_alloc - requested["cpu_m"]
+            free_mem = mem_alloc - requested["mem_mi"]
             usable_resources_result[pool][node] = {
-                "cpu_alloc_m": node_info["cpu_m"],
+                "cpu_alloc_m": cpu_alloc,
                 "cpu_requested_m": requested["cpu_m"],
                 "cpu_free_m": free_cpu,
-                "cpu_free_ratio": float(free_cpu) / node_info["cpu_m"],
-                "mem_alloc_mi": node_info["mem_mi"],
+                "cpu_free_ratio": float(free_cpu) / cpu_alloc if cpu_alloc > 0 else 0.0,
+                "mem_alloc_mi": mem_alloc,
                 "mem_requested_mi": requested["mem_mi"],
                 "mem_free_mi": free_mem,
-                "mem_free_ratio": float(free_mem) / node_info["mem_mi"],
+                "mem_free_ratio": float(free_mem) / mem_alloc if mem_alloc > 0 else 0.0,
                 "node_pool": pool,
             }
 
