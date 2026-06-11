@@ -21,6 +21,7 @@ from scaler.scaler import (
     is_unschedulable_node,
     make_deployment,
     placeholder_pod_running_on_node,
+    update_node_first_seen,
 )
 
 # ---------------------------------------------------------------------------
@@ -924,3 +925,56 @@ class TestComputeReplicaCount:
     def test_modified_replica_floored_at_zero(self):
         """Without pending, result is never negative."""
         assert compute_replica_count(-1, 1, 0, False) == 0
+
+
+class TestUpdateNodeFirstSeen:
+    def test_new_node_age_is_zero(self):
+        """A node seen for the first time has an observed age of 0."""
+        node_first_seen = {}
+        age = update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        assert age == 0.0
+
+    def test_new_node_recorded_in_dict(self):
+        node_first_seen = {}
+        update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        assert "node-a" in node_first_seen
+        assert node_first_seen["node-a"] == 1000.0
+
+    def test_existing_node_age_reflects_elapsed_time(self):
+        """A node first seen 400s ago reports age 400s."""
+        node_first_seen = {"node-a": 600.0}
+        age = update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        assert age == 400.0
+
+    def test_existing_node_first_seen_time_unchanged(self):
+        """Calling again with a later 'now' does not overwrite the first-seen time."""
+        node_first_seen = {"node-a": 600.0}
+        update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        assert node_first_seen["node-a"] == 600.0
+
+    def test_age_within_grace_period(self):
+        """Node first seen 100s ago is within a 300s grace period."""
+        node_first_seen = {"node-a": 900.0}
+        age = update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        assert age < 300
+
+    def test_age_exceeds_grace_period(self):
+        """Node first seen 400s ago exceeds a 300s grace period."""
+        node_first_seen = {"node-a": 600.0}
+        age = update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        assert age >= 300
+
+    def test_multiple_nodes_tracked_independently(self):
+        """Each node has its own first-seen timestamp."""
+        node_first_seen = {"node-a": 500.0, "node-b": 800.0}
+        age_a = update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        age_b = update_node_first_seen("node-b", node_first_seen, now=1000.0)
+        assert age_a == 500.0
+        assert age_b == 200.0
+
+    def test_new_node_does_not_affect_existing_entries(self):
+        """Adding a new node leaves existing entries untouched."""
+        node_first_seen = {"node-a": 500.0}
+        update_node_first_seen("node-b", node_first_seen, now=1000.0)
+        assert node_first_seen["node-a"] == 500.0
+        assert node_first_seen["node-b"] == 1000.0

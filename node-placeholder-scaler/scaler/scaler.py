@@ -273,6 +273,17 @@ def make_deployment(pool_name, template, node_selector, resources, replicas):
 log = logging.getLogger(__name__)
 
 
+def update_node_first_seen(node: str, node_first_seen: dict, now: float) -> float:
+    """Record the first time a node is observed and return its observed age in seconds.
+
+    Uses perf_counter values so the age is relative to scaler uptime, not wall
+    clock time.  Mutates node_first_seen in place.
+    """
+    if node not in node_first_seen:
+        node_first_seen[node] = now
+    return now - node_first_seen[node]
+
+
 def get_replica_counts(events):
     replica_counts = {}
     for ev in events:
@@ -330,6 +341,12 @@ def main():
     argparser.add_argument(
         "--strategy", choices=["cpu", "mem", "balanced"], default="balanced"
     )
+    argparser.add_argument(
+        "--node-grace-period",
+        type=int,
+        default=300,
+        help="Seconds after node creation during which the node is excluded from placeholder reduction.",
+    )
 
     args = argparser.parse_args()
 
@@ -339,6 +356,11 @@ def main():
     cpu_threshold = args.cpu_threshold
     memory_threshold = args.memory_threshold
     strategy = args.strategy
+    node_grace_period = args.node_grace_period
+
+    # Maps node name -> perf_counter value when the scaler first observed it.
+    # Used to enforce the node grace period across loop iterations.
+    node_first_seen: dict[str, float] = {}
 
     while True:
         usable_resources_result = get_usable_resources()
@@ -366,6 +388,7 @@ def main():
                 )
                 logging.info(f"Processing the node pool: {pool_name} ... ")
                 node_placeholder_deployment_reduction = 0
+                now = time.perf_counter()
                 for node, resources in pool_usable_resources.items():
                     logging.info(f"Checking node {node} in pool {pool_name} ...")
                     logging.info(
@@ -378,23 +401,35 @@ def main():
                     # Check if the node is unschedulable
                     unschedulable_node = is_unschedulable_node(node)
                     if not placeholder_pod_running and not unschedulable_node:
-                        cpu_free_ratio = resources["cpu_free_ratio"]
-                        mem_free_ratio = resources["mem_free_ratio"]
-                        if (
-                            (strategy == "cpu" and cpu_free_ratio > cpu_threshold)
-                            or (strategy == "mem" and mem_free_ratio > memory_threshold)
-                            or (
-                                strategy == "balanced"
-                                and (
-                                    cpu_free_ratio > cpu_threshold
+                        node_age_seconds = update_node_first_seen(
+                            node, node_first_seen, now
+                        )
+                        if node_age_seconds < node_grace_period:
+                            logging.info(
+                                f"Node {node} has been observed for {node_age_seconds:.0f}s, "
+                                f"within {node_grace_period}s grace period. Skipping reduction."
+                            )
+                        else:
+                            cpu_free_ratio = resources["cpu_free_ratio"]
+                            mem_free_ratio = resources["mem_free_ratio"]
+                            if (
+                                (strategy == "cpu" and cpu_free_ratio > cpu_threshold)
+                                or (
+                                    strategy == "mem"
                                     and mem_free_ratio > memory_threshold
                                 )
-                            )
-                        ):
-                            logging.info(
-                                f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio:.2f}, Memory free ratio: {mem_free_ratio:.2f})."
-                            )
-                            node_placeholder_deployment_reduction += 1
+                                or (
+                                    strategy == "balanced"
+                                    and (
+                                        cpu_free_ratio > cpu_threshold
+                                        and mem_free_ratio > memory_threshold
+                                    )
+                                )
+                            ):
+                                logging.info(
+                                    f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio:.2f}, Memory free ratio: {mem_free_ratio:.2f})."
+                                )
+                                node_placeholder_deployment_reduction += 1
                     else:
                         if placeholder_pod_running:
                             logging.info(
@@ -470,4 +505,14 @@ def main():
                     )
 
                     logging.info(proc.stdout.strip())
+
+        # Evict first-seen entries for nodes no longer present in the cluster.
+        all_seen_nodes = {
+            node
+            for pool_nodes in usable_resources_result.values()
+            for node in pool_nodes
+        }
+        node_first_seen = {
+            n: t for n, t in node_first_seen.items() if n in all_seen_nodes
+        }
         time.sleep(60)
