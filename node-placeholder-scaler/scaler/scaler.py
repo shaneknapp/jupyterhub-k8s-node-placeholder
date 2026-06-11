@@ -396,9 +396,14 @@ def main():
                             )
                             node_placeholder_deployment_reduction += 1
                     else:
-                        logging.info(
-                            f"Placeholder pod is running or {node} is unschedulable. Skipping resource check for this node."
-                        )
+                        if placeholder_pod_running:
+                            logging.info(
+                                f"Placeholder pod is running on {node}. Skipping resource check for this node."
+                            )
+                        else:
+                            logging.info(
+                                f"Node {node} is unschedulable. Skipping resource check for this node."
+                            )
 
                 calendar_replica_count = replica_count_overrides.get(pool_name, 0)
                 config_replica_count = pool_config["replicas"]
