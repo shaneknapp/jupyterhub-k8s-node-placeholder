@@ -228,10 +228,11 @@ def compute_replica_count(
     down during the window before the pod finds a new home.
     """
     if calendar_replica_count > 0 and calendar_override_enabled:
-        return max(calendar_replica_count, 0)
-    if has_pending_placeholder:
+        return calendar_replica_count
+    elif has_pending_placeholder:
         return config_replica_count
-    return max(modified_replica, 0)
+    else:
+        return max(modified_replica, 0)
 
 
 def is_unschedulable_node(node_name):
@@ -418,7 +419,11 @@ def main():
                 logging.info(
                     f"Pending placeholder pod detected for pool {pool_name}: {has_pending_placeholder}"
                 )
-                if has_pending_placeholder:
+                if calendar_replica_count > 0 and calendar_override_enabled:
+                    logging.info(
+                        f"Overriding replica count for pool {pool_name} with calendar replica count {calendar_replica_count} instead of modified replica count {modified_replica}."
+                    )
+                elif has_pending_placeholder:
                     logging.info(
                         f"Suppressing reduction for pool {pool_name}: placeholder pod is Pending."
                     )
