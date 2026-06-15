@@ -13,6 +13,7 @@ from .calendar_parser import _event_repr, get_calendar, get_events
 from .utils import parse_cpu, parse_memory
 
 yaml = YAML(typ="safe")
+log = logging.getLogger(__name__)
 
 
 def get_node_pool_mapping(label_key="hub.jupyter.org/pool-name"):
@@ -183,7 +184,7 @@ def placeholder_pod_running_on_node(node_name, namespace, label_selector):
         return False
 
     except client.exceptions.ApiException as e:
-        logging.error(f"Kubernetes API error: {e}")
+        log.error(f"Kubernetes API error: {e}")
         return False
 
 
@@ -214,7 +215,7 @@ def any_placeholder_pod_pending(namespace, label_selector, node_selector):
         return False
 
     except client.exceptions.ApiException as e:
-        logging.error(f"Kubernetes API error: {e}")
+        log.error(f"Kubernetes API error: {e}")
         return False
 
 
@@ -255,7 +256,7 @@ def is_unschedulable_node(node_name):
         return False
 
     except client.exceptions.ApiException as e:
-        logging.error(f"Kubernetes API error: {e}")
+        log.error(f"Kubernetes API error: {e}")
         return False
 
 
@@ -268,9 +269,6 @@ def make_deployment(pool_name, template, node_selector, resources, replicas):
     deployment["spec"]["template"]["spec"]["containers"][0]["resources"] = resources
 
     return deployment
-
-
-log = logging.getLogger(__name__)
 
 
 def update_node_first_seen(node: str, node_first_seen: dict, now: float) -> float:
@@ -302,36 +300,34 @@ def get_replica_counts(events):
     """Parse calendar events to extract desired replica counts for each pool."""
     replica_counts = {}
     for ev in events:
-        logging.info(f"Found event {_event_repr(ev)}")
+        log.info(f"Found event {_event_repr(ev)}")
         if ev.description:
             # initialize
             pools_replica_config = None
             try:
                 pools_replica_config = yaml.load(ev.description)
             except Exception as e:
-                logging.error(
-                    f"Caught unhandled exception parsing event description:\n{e}"
-                )
-                logging.error(f"Error in parsing description of {_event_repr(ev)}")
-                logging.error(f"{ev.description=}")
+                log.error(f"Caught unhandled exception parsing event description:\n{e}")
+                log.error(f"Error in parsing description of {_event_repr(ev)}")
+                log.error(f"{ev.description=}")
                 pass
             if pools_replica_config is None:
-                logging.error(f"No description in event {_event_repr(ev)}")
+                log.error(f"No description in event {_event_repr(ev)}")
                 continue
             elif isinstance(pools_replica_config, str):
-                logging.error("Event description not parsed as dictionary.")
-                logging.error(f"{ev.description=}")
+                log.error("Event description not parsed as dictionary.")
+                log.error(f"{ev.description=}")
                 continue
             for pool_name, count in pools_replica_config.items():
                 if not isinstance(count, int):
-                    logging.info(f"Count {count} not an integer.")
+                    log.info(f"Count {count} not an integer.")
                     continue
                 if pool_name not in replica_counts:
                     replica_counts[pool_name] = count
                 else:
                     replica_counts[pool_name] = max(replica_counts[pool_name], count)
         else:
-            logging.error(f"Event has no description: {_event_repr(ev)}")
+            log.error(f"Event has no description: {_event_repr(ev)}")
     return replica_counts
 
 
@@ -400,22 +396,22 @@ def main():
 
         if calendar:
             events = get_events(calendar)
-            logging.info(f"Found {len(events)} events at {config['calendarUrl']}.")
+            log.info(f"Found {len(events)} events at {config['calendarUrl']}.")
 
             replica_count_overrides = get_replica_counts(events)
-            logging.info(f"Overrides: {replica_count_overrides}")
+            log.info(f"Overrides: {replica_count_overrides}")
 
             # Generate deployment config based on our config
             for pool_name, pool_config in config["nodePools"].items():
                 pool_usable_resources = usable_resources_result.get(
                     pool_config["nodeSelector"][node_selector_key], {}
                 )
-                logging.info(f"Processing the node pool: {pool_name} ... ")
+                log.info(f"Processing the node pool: {pool_name} ... ")
                 node_placeholder_deployment_reduction = 0
                 now = time.perf_counter()
                 for node, resources in pool_usable_resources.items():
-                    logging.info(f"Checking node {node} in pool {pool_name} ...")
-                    logging.info(
+                    log.info(f"Checking node {node} in pool {pool_name} ...")
+                    log.info(
                         f"Node {node} has {resources['cpu_free_ratio']:.2f} CPU free ratio and {resources['mem_free_ratio']:.2f} Memory free ratio."
                     )
                     # Check if a placeholder pod is running on this node
@@ -431,11 +427,11 @@ def main():
                         update_node_last_above_threshold(
                             node, node_last_above_threshold, now
                         )
-                        logging.info(
+                        log.info(
                             f"Placeholder pod is running on {node}. Skipping resource check for this node."
                         )
                     elif unschedulable_node:
-                        logging.info(
+                        log.info(
                             f"Node {node} is unschedulable. Skipping resource check for this node."
                         )
                     else:
@@ -460,7 +456,7 @@ def main():
                                 node, node_last_above_threshold, now
                             )
                         elif node_age_seconds < node_grace_period:
-                            logging.info(
+                            log.info(
                                 f"Node {node} has been observed for {node_age_seconds:.0f}s, "
                                 f"within {node_grace_period}s grace period. Skipping reduction."
                             )
@@ -470,12 +466,12 @@ def main():
                             < node_grace_period
                         ):
                             time_since_freed = now - node_last_above_threshold[node]
-                            logging.info(
+                            log.info(
                                 f"Node {node} was above threshold {time_since_freed:.0f}s ago, "
                                 f"within {node_grace_period}s recently-freed grace period. Skipping reduction."
                             )
                         else:
-                            logging.info(
+                            log.info(
                                 f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio:.2f}, Memory free ratio: {mem_free_ratio:.2f})."
                             )
                             node_placeholder_deployment_reduction += 1
@@ -494,25 +490,25 @@ def main():
                 has_pending_placeholder = any_placeholder_pod_pending(
                     namespace, label_selector, pool_config["nodeSelector"]
                 )
-                logging.info(
+                log.info(
                     f"Calendar replica count for pool {pool_name}: {calendar_replica_count}"
                 )
-                logging.info(
+                log.info(
                     f"Config replica count for pool {pool_name}: {config_replica_count}"
                 )
-                logging.info(
+                log.info(
                     f"Pending placeholder pod detected for pool {pool_name}: {has_pending_placeholder}"
                 )
                 if calendar_replica_count > 0 and calendar_override_enabled:
-                    logging.info(
+                    log.info(
                         f"Overriding replica count for pool {pool_name} with calendar replica count {calendar_replica_count} instead of modified replica count {modified_replica}."
                     )
                 elif has_pending_placeholder:
-                    logging.info(
+                    log.info(
                         f"Suppressing reduction for pool {pool_name}: placeholder pod is Pending."
                     )
                 else:
-                    logging.info(
+                    log.info(
                         f"Reducing {pool_name} placeholder deployment replicas by {node_placeholder_deployment_reduction} based on node resources."
                     )
                 replica_count = compute_replica_count(
@@ -522,9 +518,7 @@ def main():
                     calendar_override_enabled,
                     has_pending_placeholder,
                 )
-                logging.info(
-                    f"Final replica count for pool {pool_name}: {replica_count}"
-                )
+                log.info(f"Final replica count for pool {pool_name}: {replica_count}")
 
                 deployment = make_deployment(
                     pool_name,
@@ -533,7 +527,7 @@ def main():
                     pool_config["resources"],
                     replica_count,
                 )
-                logging.info(f"Setting {pool_name} to have {replica_count} replicas")
+                log.info(f"Setting {pool_name} to have {replica_count} replicas")
                 with tempfile.NamedTemporaryFile(mode="r+") as f:
                     yaml.dump(deployment, f)
                     f.flush()
@@ -544,7 +538,7 @@ def main():
                         text=True,
                     )
 
-                    logging.info(proc.stdout.strip())
+                    log.info(proc.stdout.strip())
 
         # Evict tracking entries for nodes no longer present in the cluster.
         all_seen_nodes = {
