@@ -83,6 +83,16 @@ ICS_ALL_DAY = _vcal(
     "END:VEVENT"
 )
 
+# Event with no DESCRIPTION field
+ICS_NO_DESC = _vcal(
+    "BEGIN:VEVENT\n"
+    "UID:ev-nodesc@test\n"
+    "DTSTART:20230427T170000Z\n"
+    "DTEND:20230427T180000Z\n"
+    "SUMMARY:No Description Event\n"
+    "END:VEVENT"
+)
+
 # No events at all
 ICS_EMPTY = _vcal()
 
@@ -361,6 +371,12 @@ class TestGetEvents:
         t = datetime.datetime(2023, 4, 29, 12, 0, tzinfo=UTC)
         events = get_events(cal, time=t)
         assert len(events) == 0
+
+    def test_event_with_no_description_does_not_crash(self):
+        cal = self._cal(ICS_NO_DESC)
+        t = datetime.datetime(2023, 4, 27, 17, 30, tzinfo=UTC)
+        events = get_events(cal, time=t)
+        assert len(events) == 1
 
     def test_returns_list_not_generator(self):
         """get_events must return a list, not a generator or iterator."""
