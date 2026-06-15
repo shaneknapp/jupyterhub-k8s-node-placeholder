@@ -284,7 +284,22 @@ def update_node_first_seen(node: str, node_first_seen: dict, now: float) -> floa
     return now - node_first_seen[node]
 
 
+def update_node_last_above_threshold(
+    node: str, node_last_above_threshold: dict, now: float
+) -> None:
+    """Record that a node was seen above the utilization threshold at time `now`.
+
+    Call this whenever a node is hosting a placeholder pod or its utilization
+    is above the configured threshold.  The stored timestamp is used to
+    enforce the recently-freed grace period: a node that drops below the
+    threshold (or loses its placeholder) is not immediately counted for
+    replica reduction.  Mutates node_last_above_threshold in place.
+    """
+    node_last_above_threshold[node] = now
+
+
 def get_replica_counts(events):
+    """Parse calendar events to extract desired replica counts for each pool."""
     replica_counts = {}
     for ev in events:
         logging.info(f"Found event {_event_repr(ev)}")
@@ -345,7 +360,12 @@ def main():
         "--node-grace-period",
         type=int,
         default=300,
-        help="Seconds after node creation during which the node is excluded from placeholder reduction.",
+        help=(
+            "Seconds a node is protected from placeholder reduction: "
+            "(1) after the scaler first observes it (new-node grace period) and "
+            "(2) after it drops below the utilization threshold or loses its "
+            "placeholder pod (recently-freed grace period)."
+        ),
     )
 
     args = argparser.parse_args()
@@ -359,8 +379,12 @@ def main():
     node_grace_period = args.node_grace_period
 
     # Maps node name -> perf_counter value when the scaler first observed it.
-    # Used to enforce the node grace period across loop iterations.
+    # Used to enforce the new-node grace period across loop iterations.
     node_first_seen: dict[str, float] = {}
+    # Maps node name -> perf_counter value when the node was last seen above
+    # the utilization threshold (or hosting a placeholder pod).  Used to
+    # enforce the recently-freed grace period.
+    node_last_above_threshold: dict[str, float] = {}
 
     while True:
         usable_resources_result = get_usable_resources()
@@ -400,45 +424,61 @@ def main():
                     )
                     # Check if the node is unschedulable
                     unschedulable_node = is_unschedulable_node(node)
-                    if not placeholder_pod_running and not unschedulable_node:
+                    if placeholder_pod_running:
+                        # Node hosts the placeholder — mark it above threshold so
+                        # the recently-freed grace period applies if the placeholder
+                        # later moves off (e.g., evicted by a user login).
+                        update_node_last_above_threshold(
+                            node, node_last_above_threshold, now
+                        )
+                        logging.info(
+                            f"Placeholder pod is running on {node}. Skipping resource check for this node."
+                        )
+                    elif unschedulable_node:
+                        logging.info(
+                            f"Node {node} is unschedulable. Skipping resource check for this node."
+                        )
+                    else:
                         node_age_seconds = update_node_first_seen(
                             node, node_first_seen, now
                         )
-                        if node_age_seconds < node_grace_period:
+                        cpu_free_ratio = resources["cpu_free_ratio"]
+                        mem_free_ratio = resources["mem_free_ratio"]
+                        is_free = (
+                            (strategy == "cpu" and cpu_free_ratio > cpu_threshold)
+                            or (strategy == "mem" and mem_free_ratio > memory_threshold)
+                            or (
+                                strategy == "balanced"
+                                and (
+                                    cpu_free_ratio > cpu_threshold
+                                    and mem_free_ratio > memory_threshold
+                                )
+                            )
+                        )
+                        if not is_free:
+                            update_node_last_above_threshold(
+                                node, node_last_above_threshold, now
+                            )
+                        elif node_age_seconds < node_grace_period:
                             logging.info(
                                 f"Node {node} has been observed for {node_age_seconds:.0f}s, "
                                 f"within {node_grace_period}s grace period. Skipping reduction."
                             )
-                        else:
-                            cpu_free_ratio = resources["cpu_free_ratio"]
-                            mem_free_ratio = resources["mem_free_ratio"]
-                            if (
-                                (strategy == "cpu" and cpu_free_ratio > cpu_threshold)
-                                or (
-                                    strategy == "mem"
-                                    and mem_free_ratio > memory_threshold
-                                )
-                                or (
-                                    strategy == "balanced"
-                                    and (
-                                        cpu_free_ratio > cpu_threshold
-                                        and mem_free_ratio > memory_threshold
-                                    )
-                                )
-                            ):
-                                logging.info(
-                                    f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio:.2f}, Memory free ratio: {mem_free_ratio:.2f})."
-                                )
-                                node_placeholder_deployment_reduction += 1
-                    else:
-                        if placeholder_pod_running:
+                        elif (
+                            node in node_last_above_threshold
+                            and (now - node_last_above_threshold[node])
+                            < node_grace_period
+                        ):
+                            time_since_freed = now - node_last_above_threshold[node]
                             logging.info(
-                                f"Placeholder pod is running on {node}. Skipping resource check for this node."
+                                f"Node {node} was above threshold {time_since_freed:.0f}s ago, "
+                                f"within {node_grace_period}s recently-freed grace period. Skipping reduction."
                             )
                         else:
                             logging.info(
-                                f"Node {node} is unschedulable. Skipping resource check for this node."
+                                f"Node {node} has sufficient resources (Strategy: {strategy}, CPU free ratio: {cpu_free_ratio:.2f}, Memory free ratio: {mem_free_ratio:.2f})."
                             )
+                            node_placeholder_deployment_reduction += 1
 
                 calendar_replica_count = replica_count_overrides.get(pool_name, 0)
                 config_replica_count = pool_config["replicas"]
@@ -506,7 +546,7 @@ def main():
 
                     logging.info(proc.stdout.strip())
 
-        # Evict first-seen entries for nodes no longer present in the cluster.
+        # Evict tracking entries for nodes no longer present in the cluster.
         all_seen_nodes = {
             node
             for pool_nodes in usable_resources_result.values()
@@ -514,5 +554,8 @@ def main():
         }
         node_first_seen = {
             n: t for n, t in node_first_seen.items() if n in all_seen_nodes
+        }
+        node_last_above_threshold = {
+            n: t for n, t in node_last_above_threshold.items() if n in all_seen_nodes
         }
         time.sleep(60)

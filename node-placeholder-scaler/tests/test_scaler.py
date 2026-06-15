@@ -22,6 +22,7 @@ from scaler.scaler import (
     make_deployment,
     placeholder_pod_running_on_node,
     update_node_first_seen,
+    update_node_last_above_threshold,
 )
 
 # ---------------------------------------------------------------------------
@@ -978,3 +979,55 @@ class TestUpdateNodeFirstSeen:
         update_node_first_seen("node-b", node_first_seen, now=1000.0)
         assert node_first_seen["node-a"] == 500.0
         assert node_first_seen["node-b"] == 1000.0
+
+
+class TestUpdateNodeLastAboveThreshold:
+    def test_new_node_is_recorded(self):
+        """First call records the node with the given timestamp."""
+        d = {}
+        update_node_last_above_threshold("node-a", d, now=1000.0)
+        assert d["node-a"] == 1000.0
+
+    def test_existing_node_timestamp_is_updated(self):
+        """Subsequent calls overwrite the previous timestamp."""
+        d = {"node-a": 500.0}
+        update_node_last_above_threshold("node-a", d, now=1000.0)
+        assert d["node-a"] == 1000.0
+
+    def test_multiple_nodes_tracked_independently(self):
+        """Each node maintains its own last-above-threshold time."""
+        d = {}
+        update_node_last_above_threshold("node-a", d, now=800.0)
+        update_node_last_above_threshold("node-b", d, now=1000.0)
+        assert d["node-a"] == 800.0
+        assert d["node-b"] == 1000.0
+
+    def test_update_does_not_affect_other_entries(self):
+        """Updating one node leaves other entries untouched."""
+        d = {"node-a": 500.0}
+        update_node_last_above_threshold("node-b", d, now=1000.0)
+        assert d["node-a"] == 500.0
+
+    def test_recently_freed_within_grace_period(self):
+        """A node last above threshold 100s ago is within a 300s grace period."""
+        d = {"node-a": 900.0}
+        time_since = 1000.0 - d["node-a"]
+        assert time_since < 300
+
+    def test_recently_freed_exceeds_grace_period(self):
+        """A node last above threshold 400s ago exceeds the 300s grace period."""
+        d = {"node-a": 600.0}
+        time_since = 1000.0 - d["node-a"]
+        assert time_since >= 300
+
+    def test_node_never_above_threshold_not_in_dict(self):
+        """A node with no above-threshold history has no entry in the dict."""
+        d = {}
+        assert "node-a" not in d
+
+    def test_repeated_updates_reflect_latest_time(self):
+        """Calling multiple times always stores the most recent timestamp."""
+        d = {}
+        for t in [100.0, 500.0, 900.0, 1000.0]:
+            update_node_last_above_threshold("node-a", d, now=t)
+        assert d["node-a"] == 1000.0
