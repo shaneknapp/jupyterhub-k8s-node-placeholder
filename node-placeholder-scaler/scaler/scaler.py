@@ -501,41 +501,49 @@ def main():
         with open(args.placeholder_template_file) as f:
             placeholder_template = yaml.load(f)
 
-        calendar = get_calendar(cfg["calendarUrl"])
+        if "calendarUrl" in cfg:
+            calendar = get_calendar(cfg["calendarUrl"])
+        else:
+            log.info(
+                "No calendarUrl in config; skipping calendar processing and using config replica counts only."
+            )
+            calendar = None
 
         if calendar:
             events = get_events(calendar)
             log.info(f"Found {len(events)} events at {cfg['calendarUrl']}.")
-
             replica_count_overrides = get_replica_counts(events)
             log.info(f"Overrides: {replica_count_overrides}")
+        else:
+            log.info("No calendar available; using config replica counts only.")
+            replica_count_overrides = {}
 
-            calendar_override_enabled = cfg.get("calendarOverrideEnabled", False)
-            if not isinstance(calendar_override_enabled, bool):
-                raise ValueError(
-                    f"calendarOverrideEnabled must be a boolean, got {type(calendar_override_enabled).__name__}: {calendar_override_enabled!r}"
-                )
+        calendar_override_enabled = cfg.get("calendarOverrideEnabled", False)
+        if not isinstance(calendar_override_enabled, bool):
+            raise ValueError(
+                f"calendarOverrideEnabled must be a boolean, got {type(calendar_override_enabled).__name__}: {calendar_override_enabled!r}"
+            )
 
-            for pool_name, pool_config in cfg["nodePools"].items():
-                pool_usable_resources = usable_resources_result.get(
-                    pool_config["nodeSelector"][node_selector_key], {}
-                )
-                _process_pool(
-                    pool_name=pool_name,
-                    pool_config=pool_config,
-                    pool_usable_resources=pool_usable_resources,
-                    replica_count_overrides=replica_count_overrides,
-                    calendar_override_enabled=calendar_override_enabled,
-                    placeholder_template=placeholder_template,
-                    namespace=namespace,
-                    label_selector=label_selector,
-                    strategy=strategy,
-                    cpu_threshold=cpu_threshold,
-                    memory_threshold=memory_threshold,
-                    node_grace_period=node_grace_period,
-                    node_first_seen=node_first_seen,
-                    node_last_above_threshold=node_last_above_threshold,
-                )
+        for pool_name, pool_config in cfg["nodePools"].items():
+            pool_usable_resources = usable_resources_result.get(
+                pool_config["nodeSelector"][node_selector_key], {}
+            )
+            _process_pool(
+                pool_name=pool_name,
+                pool_config=pool_config,
+                pool_usable_resources=pool_usable_resources,
+                replica_count_overrides=replica_count_overrides,
+                calendar_override_enabled=calendar_override_enabled,
+                placeholder_template=placeholder_template,
+                namespace=namespace,
+                label_selector=label_selector,
+                strategy=strategy,
+                cpu_threshold=cpu_threshold,
+                memory_threshold=memory_threshold,
+                node_grace_period=node_grace_period,
+                node_first_seen=node_first_seen,
+                node_last_above_threshold=node_last_above_threshold,
+            )
 
         # Evict tracking entries for nodes no longer present in the cluster.
         all_seen_nodes = {
