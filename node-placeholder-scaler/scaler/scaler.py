@@ -464,7 +464,7 @@ def main():
     argparser.add_argument(
         "--node-grace-period",
         type=int,
-        default=300,
+        default=600,
         help=(
             "Seconds a node is protected from placeholder reduction: "
             "(1) after the scaler first observes it (new-node grace period) and "
