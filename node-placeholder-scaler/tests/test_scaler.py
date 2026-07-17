@@ -954,16 +954,21 @@ class TestUpdateNodeFirstSeen:
         assert node_first_seen["node-a"] == 600.0
 
     def test_age_within_grace_period(self):
-        """Node first seen 100s ago is within a 300s grace period."""
-        node_first_seen = {"node-a": 900.0}
-        age = update_node_first_seen("node-a", node_first_seen, now=1000.0)
-        assert age < 300
+        """A node seen 100s ago is within a 600s grace period."""
+        now = 1000.0
+        # stored value is the clock reading when first seen, so 100s of age
+        # means first_seen = now - 100.
+        node_first_seen = {"node-a": now - 100}
+        age = update_node_first_seen("node-a", node_first_seen, now=now)
+        assert age < 600
 
     def test_age_exceeds_grace_period(self):
-        """Node first seen 400s ago exceeds a 300s grace period."""
-        node_first_seen = {"node-a": 600.0}
-        age = update_node_first_seen("node-a", node_first_seen, now=1000.0)
-        assert age >= 300
+        """A node seen 700s ago exceeds a 600s grace period."""
+        now = 1000.0
+        # first_seen = now - 700 => age of 700s, past the 600s threshold.
+        node_first_seen = {"node-a": now - 700}
+        age = update_node_first_seen("node-a", node_first_seen, now=now)
+        assert age >= 600
 
     def test_multiple_nodes_tracked_independently(self):
         """Each node has its own first-seen timestamp."""
@@ -1009,16 +1014,21 @@ class TestUpdateNodeLastAboveThreshold:
         assert d["node-a"] == 500.0
 
     def test_recently_freed_within_grace_period(self):
-        """A node last above threshold 100s ago is within a 300s grace period."""
-        d = {"node-a": 900.0}
-        time_since = 1000.0 - d["node-a"]
-        assert time_since < 300
+        """A node last above threshold 100s ago is within a 600s grace period."""
+        now = 1000.0
+        # stored value is the clock reading when last above threshold, so
+        # 100s of elapsed time means last_above = now - 100.
+        d = {"node-a": now - 100}
+        time_since = now - d["node-a"]
+        assert time_since < 600
 
     def test_recently_freed_exceeds_grace_period(self):
-        """A node last above threshold 400s ago exceeds the 300s grace period."""
-        d = {"node-a": 600.0}
-        time_since = 1000.0 - d["node-a"]
-        assert time_since >= 300
+        """A node last above threshold 700s ago exceeds the 600s grace period."""
+        now = 1000.0
+        # last_above = now - 700 => 700s elapsed, past the 600s threshold.
+        d = {"node-a": now - 700}
+        time_since = now - d["node-a"]
+        assert time_since >= 600
 
     def test_node_never_above_threshold_not_in_dict(self):
         """A node with no above-threshold history has no entry in the dict."""
