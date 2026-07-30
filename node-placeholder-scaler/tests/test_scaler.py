@@ -165,6 +165,15 @@ class TestGetReplicaCounts:
         ev = _event("pool-a: not-a-number\n")
         assert get_replica_counts([ev]) == {}
 
+    def test_negative_value_skipped(self):
+        ev = _event("pool-a: -1\n")
+        assert get_replica_counts([ev]) == {}
+
+    def test_zero_value_preserved(self):
+        """An explicit 0 is a real count, not an absent pool."""
+        ev = _event("pool-a: 0\n")
+        assert get_replica_counts([ev]) == {"pool-a": 0}
+
     def test_mixed_valid_and_invalid(self):
         ev = _event("pool-a: 5\npool-b: bad\n")
         result = get_replica_counts([ev])
@@ -185,18 +194,6 @@ class TestGetReplicaCounts:
         ev2 = _event("pool-b: 5\npool-c: 2\n")
         result = get_replica_counts([ev1, ev2])
         assert result == {"pool-a": 3, "pool-b": 5, "pool-c": 2}
-
-    def test_negative_count_accepted(self):
-        """Negative counts are stored as-is; compute_replica_count floors the result at 0."""
-        ev = _event("pool-a: -1\n")
-        assert get_replica_counts([ev]) == {"pool-a": -1}
-
-    def test_zero_count_stored_but_not_used_as_override(self):
-        """Zero is a valid integer and is stored, but compute_replica_count treats
-        calendar_replica_count=0 as 'no active event' and falls through to normal scaling.
-        """
-        ev = _event("pool-a: 0\n")
-        assert get_replica_counts([ev]) == {"pool-a": 0}
 
 
 # ---------------------------------------------------------------------------
@@ -894,19 +891,23 @@ class TestAnyPlaceholderPodPending:
 
 class TestComputeReplicaCount:
     def test_normal_no_reduction(self):
-        assert compute_replica_count(1, 1, 0, False) == 1
+        assert compute_replica_count(1, 1, None, False) == 1
 
     def test_normal_with_reduction(self):
         """When a node has spare capacity, reduction brings count to 0."""
-        assert compute_replica_count(0, 1, 0, False) == 0
+        assert compute_replica_count(0, 1, None, False) == 0
 
     def test_pending_suppresses_reduction(self):
         """Race condition: placeholder evicted but not yet rescheduled."""
-        assert compute_replica_count(0, 1, 0, False, has_pending_placeholder=True) == 1
+        assert (
+            compute_replica_count(0, 1, None, False, has_pending_placeholder=True) == 1
+        )
 
     def test_pending_returns_override_not_modified(self):
         """Floor is override_replica_count, not modified_replica, when pending."""
-        assert compute_replica_count(-1, 2, 0, False, has_pending_placeholder=True) == 2
+        assert (
+            compute_replica_count(-1, 2, None, False, has_pending_placeholder=True) == 2
+        )
 
     def test_pending_preserves_calendar_count_when_override_disabled(self):
         """Calendar count survives the pending window even with override off."""
@@ -919,9 +920,13 @@ class TestComputeReplicaCount:
         """Calendar override is authoritative; pending state doesn't change it."""
         assert compute_replica_count(0, 1, 3, True, has_pending_placeholder=True) == 3
 
-    def test_calendar_count_zero_falls_through(self):
-        """calendar_replica_count=0 means no active calendar event; use normal path."""
-        assert compute_replica_count(1, 1, 0, True) == 1
+    def test_calendar_count_none_falls_through(self):
+        """calendar_replica_count=None means no active calendar event; use normal path."""
+        assert compute_replica_count(1, 1, None, True) == 1
+
+    def test_calendar_count_zero_is_honored(self):
+        """An event explicitly setting 0 is authoritative, not treated as absent."""
+        assert compute_replica_count(1, 1, 0, True) == 0
 
     def test_calendar_disabled_falls_through(self):
         """calendar_override_enabled=False means ignore calendar count."""
@@ -929,7 +934,7 @@ class TestComputeReplicaCount:
 
     def test_modified_replica_floored_at_zero(self):
         """Without pending, result is never negative."""
-        assert compute_replica_count(-1, 1, 0, False) == 0
+        assert compute_replica_count(-1, 1, None, False) == 0
 
 
 class TestUpdateNodeFirstSeen:

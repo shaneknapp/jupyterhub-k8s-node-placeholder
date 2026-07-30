@@ -219,7 +219,7 @@ def compute_replica_count(
     a new home, and any calendar-provided count is preserved even when calendar
     override isn't enabled.
     """
-    if calendar_replica_count > 0 and calendar_override_enabled:
+    if calendar_replica_count is not None and calendar_override_enabled:
         return calendar_replica_count
     elif has_pending_placeholder:
         return max(override_replica_count, 0)
@@ -297,7 +297,12 @@ def get_replica_counts(events):
                 continue
             for pool_name, count in pools_replica_config.items():
                 if not isinstance(count, int):
-                    log.info(f"Count {count} not an integer.")
+                    log.info(f"Count {count} for pool {pool_name} not an integer.")
+                    continue
+                if count < 0:
+                    log.error(
+                        f"Count {count} for pool {pool_name} is negative; skipping."
+                    )
                     continue
                 if pool_name not in replica_counts:
                     replica_counts[pool_name] = count
@@ -388,7 +393,7 @@ def _process_pool(
                 )
                 node_placeholder_deployment_reduction += 1
 
-    calendar_replica_count = replica_count_overrides.get(pool_name, 0)
+    calendar_replica_count = replica_count_overrides.get(pool_name, None)
     config_replica_count = pool_config["replicas"]
     override_replica_count = replica_count_overrides.get(
         pool_name, pool_config["replicas"]
@@ -402,7 +407,7 @@ def _process_pool(
     log.info(
         f"Pending placeholder pod detected for pool {pool_name}: {has_pending_placeholder}"
     )
-    if calendar_replica_count > 0 and calendar_override_enabled:
+    if calendar_replica_count is not None and calendar_override_enabled:
         log.info(
             f"Overriding replica count for pool {pool_name} with calendar replica count {calendar_replica_count} instead of modified replica count {modified_replica}."
         )
