@@ -204,7 +204,7 @@ def any_placeholder_pod_pending(namespace, label_selector, node_selector):
 
 def compute_replica_count(
     modified_replica,
-    config_replica_count,
+    override_replica_count,
     calendar_replica_count,
     calendar_override_enabled,
     has_pending_placeholder=False,
@@ -212,13 +212,17 @@ def compute_replica_count(
     """Return the target placeholder replica count for a pool.
 
     Calendar override takes priority. If a placeholder pod is Pending (evicted
-    but not yet rescheduled), suppress reduction so the deployment isn't scaled
-    down during the window before the pod finds a new home.
+    but not yet rescheduled), suppress reduction and fall back to
+    override_replica_count, the same pre-reduction baseline used to compute
+    modified_replica (replica_count_overrides.get(pool_name, pool_config["replicas"])),
+    so the deployment isn't scaled down during the window before the pod finds
+    a new home, and any calendar-provided count is preserved even when calendar
+    override isn't enabled.
     """
     if calendar_replica_count > 0 and calendar_override_enabled:
         return calendar_replica_count
     elif has_pending_placeholder:
-        return config_replica_count
+        return max(override_replica_count, 0)
     else:
         return max(modified_replica, 0)
 
@@ -386,10 +390,10 @@ def _process_pool(
 
     calendar_replica_count = replica_count_overrides.get(pool_name, 0)
     config_replica_count = pool_config["replicas"]
-    modified_replica = (
-        replica_count_overrides.get(pool_name, pool_config["replicas"])
-        - node_placeholder_deployment_reduction
+    override_replica_count = replica_count_overrides.get(
+        pool_name, pool_config["replicas"]
     )
+    modified_replica = override_replica_count - node_placeholder_deployment_reduction
     has_pending_placeholder = any_placeholder_pod_pending(
         namespace, label_selector, pool_config["nodeSelector"]
     )
@@ -413,7 +417,7 @@ def _process_pool(
 
     replica_count = compute_replica_count(
         modified_replica,
-        config_replica_count,
+        override_replica_count,
         calendar_replica_count,
         calendar_override_enabled,
         has_pending_placeholder,

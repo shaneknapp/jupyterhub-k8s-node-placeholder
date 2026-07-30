@@ -904,9 +904,13 @@ class TestComputeReplicaCount:
         """Race condition: placeholder evicted but not yet rescheduled."""
         assert compute_replica_count(0, 1, 0, False, has_pending_placeholder=True) == 1
 
-    def test_pending_returns_config_not_modified(self):
-        """Floor is config_replica_count, not modified_replica, when pending."""
+    def test_pending_returns_override_not_modified(self):
+        """Floor is override_replica_count, not modified_replica, when pending."""
         assert compute_replica_count(-1, 2, 0, False, has_pending_placeholder=True) == 2
+
+    def test_pending_preserves_calendar_count_when_override_disabled(self):
+        """Calendar count survives the pending window even with override off."""
+        assert compute_replica_count(-1, 3, 3, False, has_pending_placeholder=True) == 3
 
     def test_calendar_override_takes_priority(self):
         assert compute_replica_count(0, 1, 3, True) == 3
