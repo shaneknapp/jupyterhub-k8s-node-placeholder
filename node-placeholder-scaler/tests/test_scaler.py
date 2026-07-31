@@ -11,6 +11,8 @@ from unittest.mock import MagicMock, patch
 from kubernetes.client.exceptions import ApiException
 from kubernetes.config import ConfigException
 from scaler.scaler import (
+    any_placeholder_pod_pending,
+    compute_replica_count,
     get_allocatable_resources_by_pool,
     get_node_pool_mapping,
     get_replica_counts,
@@ -19,6 +21,8 @@ from scaler.scaler import (
     is_unschedulable_node,
     make_deployment,
     placeholder_pod_running_on_node,
+    update_node_first_seen,
+    update_node_last_above_threshold,
 )
 
 # ---------------------------------------------------------------------------
@@ -160,6 +164,15 @@ class TestGetReplicaCounts:
     def test_non_integer_value_skipped(self):
         ev = _event("pool-a: not-a-number\n")
         assert get_replica_counts([ev]) == {}
+
+    def test_negative_value_skipped(self):
+        ev = _event("pool-a: -1\n")
+        assert get_replica_counts([ev]) == {}
+
+    def test_zero_value_preserved(self):
+        """An explicit 0 is a real count, not an absent pool."""
+        ev = _event("pool-a: 0\n")
+        assert get_replica_counts([ev]) == {"pool-a": 0}
 
     def test_mixed_valid_and_invalid(self):
         ev = _event("pool-a: 5\npool-b: bad\n")
@@ -354,6 +367,19 @@ class TestGetAllocatableResourcesByPool:
         )
         assert len(result["pool-a"]) == 2
 
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_invalid_memory_defaults_to_zero(
+        self, mock_api_cls, mock_incluster, mock_kube
+    ):
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_node.return_value.items = [
+            _alloc_node("node-1", "2", "bad-memory")
+        ]
+        result = get_allocatable_resources_by_pool({"node-1": "pool-a"})
+        assert result["pool-a"]["node-1"]["mem_mi"] == 0
+
 
 # ---------------------------------------------------------------------------
 # get_requested_resources_by_pool
@@ -537,6 +563,71 @@ class TestGetUsableResources:
         assert result["pool-a"]["node-1"]["cpu_free_m"] == 1500
         assert result["pool-b"]["node-2"]["cpu_free_m"] == 6000
 
+    @patch("scaler.scaler.get_requested_resources_by_pool")
+    @patch("scaler.scaler.get_allocatable_resources_by_pool")
+    @patch("scaler.scaler.get_node_pool_mapping")
+    def test_pool_absent_from_requested(self, mock_mapping, mock_alloc, mock_req):
+        """Pool exists in alloc but has no pods — requested omits it entirely."""
+        mock_mapping.return_value = {"node-1": "pool-a"}
+        mock_alloc.return_value = {
+            "pool-a": {"node-1": {"cpu_m": 4000, "mem_mi": 8192}}
+        }
+        mock_req.return_value = {}
+
+        result = get_usable_resources()
+        node = result["pool-a"]["node-1"]
+        assert node["cpu_free_m"] == 4000
+        assert node["mem_free_mi"] == 8192
+        assert node["cpu_free_ratio"] == 1.0
+        assert node["mem_free_ratio"] == 1.0
+
+    @patch("scaler.scaler.get_requested_resources_by_pool")
+    @patch("scaler.scaler.get_allocatable_resources_by_pool")
+    @patch("scaler.scaler.get_node_pool_mapping")
+    def test_node_absent_from_requested_pool(self, mock_mapping, mock_alloc, mock_req):
+        """Pool exists in requested but this specific node has no pods."""
+        mock_mapping.return_value = {"node-1": "pool-a", "node-2": "pool-a"}
+        mock_alloc.return_value = {
+            "pool-a": {
+                "node-1": {"cpu_m": 4000, "mem_mi": 8192},
+                "node-2": {"cpu_m": 4000, "mem_mi": 8192},
+            }
+        }
+        mock_req.return_value = {"pool-a": {"node-1": {"cpu_m": 1000, "mem_mi": 2048}}}
+
+        result = get_usable_resources()
+        assert result["pool-a"]["node-1"]["cpu_free_m"] == 3000
+        assert result["pool-a"]["node-2"]["cpu_free_m"] == 4000
+        assert result["pool-a"]["node-2"]["cpu_free_ratio"] == 1.0
+
+    @patch("scaler.scaler.get_requested_resources_by_pool")
+    @patch("scaler.scaler.get_allocatable_resources_by_pool")
+    @patch("scaler.scaler.get_node_pool_mapping")
+    def test_zero_allocatable_cpu_no_division_error(
+        self, mock_mapping, mock_alloc, mock_req
+    ):
+        """cpu_m=0 (e.g. parse failure) must not raise ZeroDivisionError."""
+        mock_mapping.return_value = {"node-1": "pool-a"}
+        mock_alloc.return_value = {"pool-a": {"node-1": {"cpu_m": 0, "mem_mi": 8192}}}
+        mock_req.return_value = {"pool-a": {"node-1": {"cpu_m": 0, "mem_mi": 0}}}
+
+        result = get_usable_resources()
+        assert result["pool-a"]["node-1"]["cpu_free_ratio"] == 0.0
+
+    @patch("scaler.scaler.get_requested_resources_by_pool")
+    @patch("scaler.scaler.get_allocatable_resources_by_pool")
+    @patch("scaler.scaler.get_node_pool_mapping")
+    def test_zero_allocatable_mem_no_division_error(
+        self, mock_mapping, mock_alloc, mock_req
+    ):
+        """mem_mi=0 (e.g. parse failure) must not raise ZeroDivisionError."""
+        mock_mapping.return_value = {"node-1": "pool-a"}
+        mock_alloc.return_value = {"pool-a": {"node-1": {"cpu_m": 4000, "mem_mi": 0}}}
+        mock_req.return_value = {"pool-a": {"node-1": {"cpu_m": 0, "mem_mi": 0}}}
+
+        result = get_usable_resources()
+        assert result["pool-a"]["node-1"]["mem_free_ratio"] == 0.0
+
 
 # ---------------------------------------------------------------------------
 # placeholder_pod_running_on_node
@@ -690,3 +781,272 @@ class TestIsUnschedulableNode:
         mock_api_cls.return_value.read_node.assert_called_once_with(
             name="my-special-node"
         )
+
+
+# ---------------------------------------------------------------------------
+# any_placeholder_pod_pending
+# ---------------------------------------------------------------------------
+
+_NODE_SELECTOR = {"hub.jupyter.org/pool-name": "pool-a"}
+_OTHER_NODE_SELECTOR = {"hub.jupyter.org/pool-name": "pool-b"}
+
+
+def _pending_pod(node_selector=None):
+    p = MagicMock()
+    p.status.phase = "Pending"
+    p.spec.node_selector = node_selector or _NODE_SELECTOR
+    return p
+
+
+class TestAnyPlaceholderPodPending:
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_no_pods_returns_false(self, mock_api_cls, mock_incluster, mock_kube):
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = []
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is False
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_running_pod_returns_false(self, mock_api_cls, mock_incluster, mock_kube):
+        mock_incluster.side_effect = ConfigException()
+        p = MagicMock()
+        p.status.phase = "Running"
+        p.spec.node_selector = _NODE_SELECTOR
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = [p]
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is False
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_pending_pod_matching_pool_returns_true(
+        self, mock_api_cls, mock_incluster, mock_kube
+    ):
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = [
+            _pending_pod(_NODE_SELECTOR)
+        ]
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is True
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_pending_pod_different_pool_returns_false(
+        self, mock_api_cls, mock_incluster, mock_kube
+    ):
+        """Pending pod from a different pool must not suppress reduction for this pool."""
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = [
+            _pending_pod(_OTHER_NODE_SELECTOR)
+        ]
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is False
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_api_error_returns_false(self, mock_api_cls, mock_incluster, mock_kube):
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_namespaced_pod.side_effect = ApiException()
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is False
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_namespace_and_label_selector_passed_to_api(
+        self, mock_api_cls, mock_incluster, mock_kube
+    ):
+        mock_incluster.side_effect = ConfigException()
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = []
+        any_placeholder_pod_pending(
+            "my-ns", "app=ph,component=placeholder", _NODE_SELECTOR
+        )
+        mock_api_cls.return_value.list_namespaced_pod.assert_called_once_with(
+            namespace="my-ns", label_selector="app=ph,component=placeholder"
+        )
+
+    @patch("scaler.scaler.config.load_kube_config")
+    @patch("scaler.scaler.config.load_incluster_config")
+    @patch("scaler.scaler.client.CoreV1Api")
+    def test_multiple_pods_one_pending_matching_returns_true(
+        self, mock_api_cls, mock_incluster, mock_kube
+    ):
+        """Returns True when one of several pods is Pending and matches the pool."""
+        mock_incluster.side_effect = ConfigException()
+        running = MagicMock()
+        running.status.phase = "Running"
+        running.spec.node_selector = _NODE_SELECTOR
+        mock_api_cls.return_value.list_namespaced_pod.return_value.items = [
+            running,
+            _pending_pod(_NODE_SELECTOR),
+        ]
+        assert any_placeholder_pod_pending("ns", "app=ph", _NODE_SELECTOR) is True
+
+
+# ---------------------------------------------------------------------------
+# compute_replica_count
+# ---------------------------------------------------------------------------
+
+
+class TestComputeReplicaCount:
+    def test_normal_no_reduction(self):
+        assert compute_replica_count(1, 1, None, False) == 1
+
+    def test_normal_with_reduction(self):
+        """When a node has spare capacity, reduction brings count to 0."""
+        assert compute_replica_count(0, 1, None, False) == 0
+
+    def test_pending_suppresses_reduction(self):
+        """Race condition: placeholder evicted but not yet rescheduled."""
+        assert (
+            compute_replica_count(0, 1, None, False, has_pending_placeholder=True) == 1
+        )
+
+    def test_pending_returns_override_not_modified(self):
+        """Floor is override_replica_count, not modified_replica, when pending."""
+        assert (
+            compute_replica_count(-1, 2, None, False, has_pending_placeholder=True) == 2
+        )
+
+    def test_pending_preserves_calendar_count_when_override_disabled(self):
+        """Calendar count survives the pending window even with override off."""
+        assert compute_replica_count(-1, 3, 3, False, has_pending_placeholder=True) == 3
+
+    def test_calendar_override_takes_priority(self):
+        assert compute_replica_count(0, 1, 3, True) == 3
+
+    def test_calendar_override_ignores_pending(self):
+        """Calendar override is authoritative; pending state doesn't change it."""
+        assert compute_replica_count(0, 1, 3, True, has_pending_placeholder=True) == 3
+
+    def test_calendar_count_none_falls_through(self):
+        """calendar_replica_count=None means no active calendar event; use normal path."""
+        assert compute_replica_count(1, 1, None, True) == 1
+
+    def test_calendar_count_zero_is_honored(self):
+        """An event explicitly setting 0 is authoritative, not treated as absent."""
+        assert compute_replica_count(1, 1, 0, True) == 0
+
+    def test_calendar_disabled_falls_through(self):
+        """calendar_override_enabled=False means ignore calendar count."""
+        assert compute_replica_count(0, 1, 3, False) == 0
+
+    def test_modified_replica_floored_at_zero(self):
+        """Without pending, result is never negative."""
+        assert compute_replica_count(-1, 1, None, False) == 0
+
+
+class TestUpdateNodeFirstSeen:
+    def test_new_node_age_is_zero(self):
+        """A node seen for the first time has an observed age of 0."""
+        node_first_seen = {}
+        age = update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        assert age == 0.0
+
+    def test_new_node_recorded_in_dict(self):
+        node_first_seen = {}
+        update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        assert "node-a" in node_first_seen
+        assert node_first_seen["node-a"] == 1000.0
+
+    def test_existing_node_age_reflects_elapsed_time(self):
+        """A node first seen 400s ago reports age 400s."""
+        node_first_seen = {"node-a": 600.0}
+        age = update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        assert age == 400.0
+
+    def test_existing_node_first_seen_time_unchanged(self):
+        """Calling again with a later 'now' does not overwrite the first-seen time."""
+        node_first_seen = {"node-a": 600.0}
+        update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        assert node_first_seen["node-a"] == 600.0
+
+    def test_age_within_grace_period(self):
+        """A node seen 100s ago is within a 600s grace period."""
+        now = 1000.0
+        # stored value is the clock reading when first seen, so 100s of age
+        # means first_seen = now - 100.
+        node_first_seen = {"node-a": now - 100}
+        age = update_node_first_seen("node-a", node_first_seen, now=now)
+        assert age < 600
+
+    def test_age_exceeds_grace_period(self):
+        """A node seen 700s ago exceeds a 600s grace period."""
+        now = 1000.0
+        # first_seen = now - 700 => age of 700s, past the 600s threshold.
+        node_first_seen = {"node-a": now - 700}
+        age = update_node_first_seen("node-a", node_first_seen, now=now)
+        assert age >= 600
+
+    def test_multiple_nodes_tracked_independently(self):
+        """Each node has its own first-seen timestamp."""
+        node_first_seen = {"node-a": 500.0, "node-b": 800.0}
+        age_a = update_node_first_seen("node-a", node_first_seen, now=1000.0)
+        age_b = update_node_first_seen("node-b", node_first_seen, now=1000.0)
+        assert age_a == 500.0
+        assert age_b == 200.0
+
+    def test_new_node_does_not_affect_existing_entries(self):
+        """Adding a new node leaves existing entries untouched."""
+        node_first_seen = {"node-a": 500.0}
+        update_node_first_seen("node-b", node_first_seen, now=1000.0)
+        assert node_first_seen["node-a"] == 500.0
+        assert node_first_seen["node-b"] == 1000.0
+
+
+class TestUpdateNodeLastAboveThreshold:
+    def test_new_node_is_recorded(self):
+        """First call records the node with the given timestamp."""
+        d = {}
+        update_node_last_above_threshold("node-a", d, now=1000.0)
+        assert d["node-a"] == 1000.0
+
+    def test_existing_node_timestamp_is_updated(self):
+        """Subsequent calls overwrite the previous timestamp."""
+        d = {"node-a": 500.0}
+        update_node_last_above_threshold("node-a", d, now=1000.0)
+        assert d["node-a"] == 1000.0
+
+    def test_multiple_nodes_tracked_independently(self):
+        """Each node maintains its own last-above-threshold time."""
+        d = {}
+        update_node_last_above_threshold("node-a", d, now=800.0)
+        update_node_last_above_threshold("node-b", d, now=1000.0)
+        assert d["node-a"] == 800.0
+        assert d["node-b"] == 1000.0
+
+    def test_update_does_not_affect_other_entries(self):
+        """Updating one node leaves other entries untouched."""
+        d = {"node-a": 500.0}
+        update_node_last_above_threshold("node-b", d, now=1000.0)
+        assert d["node-a"] == 500.0
+
+    def test_recently_freed_within_grace_period(self):
+        """A node last above threshold 100s ago is within a 600s grace period."""
+        now = 1000.0
+        # stored value is the clock reading when last above threshold, so
+        # 100s of elapsed time means last_above = now - 100.
+        d = {"node-a": now - 100}
+        time_since = now - d["node-a"]
+        assert time_since < 600
+
+    def test_recently_freed_exceeds_grace_period(self):
+        """A node last above threshold 700s ago exceeds the 600s grace period."""
+        now = 1000.0
+        # last_above = now - 700 => 700s elapsed, past the 600s threshold.
+        d = {"node-a": now - 700}
+        time_since = now - d["node-a"]
+        assert time_since >= 600
+
+    def test_node_never_above_threshold_not_in_dict(self):
+        """A node with no above-threshold history has no entry in the dict."""
+        d = {}
+        assert "node-a" not in d
+
+    def test_repeated_updates_reflect_latest_time(self):
+        """Calling multiple times always stores the most recent timestamp."""
+        d = {}
+        for t in [100.0, 500.0, 900.0, 1000.0]:
+            update_node_last_above_threshold("node-a", d, now=t)
+        assert d["node-a"] == 1000.0

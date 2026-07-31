@@ -89,6 +89,7 @@ def get_events(calendar, time=None):
     # https://stackoverflow.com/questions/753052/strip-html-from-strings-in-python
     events = [x for x in events_iter]
     for ev in events:
-        ev.description = re.sub("<[^<]+?>", "", ev.description)
+        if ev.description:
+            ev.description = re.sub("<[^<]+?>", "", ev.description)
 
     return events
